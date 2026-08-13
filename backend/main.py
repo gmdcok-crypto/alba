@@ -7,16 +7,19 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from datetime import datetime
+from typing import Union
+
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 
-from backend.database import get_connection, use_mysql
+from backend.database import DictCursor, get_connection, on_railway, use_mysql
 from backend.routes import auth, clock, owner, stores
 from backend.schema_ensure import ensure_schema
 
@@ -42,6 +45,8 @@ async def _lifespan(_app: FastAPI):
     try:
         ensure_schema(conn)
         logger.info("schema ready (%s)", "mysql" if use_mysql() else "sqlite")
+        if on_railway() and not (os.getenv("JWT_SECRET") or "").strip():
+            logger.warning("JWT_SECRET 이 없습니다. 웹 서비스 Variables에 강한 임의 문자열을 넣으세요.")
         yield
     finally:
         conn.close()
@@ -92,11 +97,52 @@ def health() -> dict:
     return {
         "ok": True,
         "service": "alba-api",
+        "stack": "fastapi",
         "db": "mysql" if use_mysql() else "sqlite",
+        "railway": on_railway(),
     }
 
 
+@app.get("/api/db/ping", response_model=None)
+def db_ping() -> Union[dict, JSONResponse]:
+    try:
+        conn = get_connection()
+        try:
+            cur = conn.cursor(DictCursor)
+            if conn.kind == "mysql":
+                cur.execute("SET time_zone = '+09:00'")
+                cur.execute("SELECT NOW() AS db_now, @@session.time_zone AS tz")
+            else:
+                cur.execute("SELECT datetime('now','localtime') AS db_now")
+            row = cur.fetchone() or {}
+        finally:
+            conn.close()
+        db_now = row.get("db_now")
+        now_str = db_now.isoformat() if isinstance(db_now, datetime) else (str(db_now) if db_now is not None else None)
+        return {
+            "ok": True,
+            "db": "mysql" if use_mysql() else "sqlite",
+            "sessionTimeZone": row.get("tz"),
+            "nowKstSession": now_str,
+        }
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 _STATIC_DIST = Path(__file__).resolve().parent.parent / "client" / "dist"
+_INDEX = _STATIC_DIST / "index.html"
+
+
+@app.get("/", response_model=None)
+def spa_index() -> Union[FileResponse, JSONResponse]:
+    if not _INDEX.exists():
+        return JSONResponse(
+            {"detail": "client/dist 가 없습니다. Railway 빌드에서 Vite 가 실행됐는지 확인하세요."},
+            status_code=503,
+        )
+    return FileResponse(_INDEX)
+
+
 if _STATIC_DIST.exists():
     app.mount("/", StaticFiles(directory=_STATIC_DIST, html=True), name="frontend")
 else:

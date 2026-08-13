@@ -13,7 +13,10 @@
 - 사장님: 실시간 근무 현황, 시급 설정
 - 선택: 매장 위치 반경 안에서만 출퇴근
 
-로컬은 **SQLite** (`data/alba.db`)라 DB 설치 없이 바로 돌아갑니다. Railway 등에서는 MariaDB/MySQL 환경 변수가 있으면 그걸 씁니다.
+운영: https://alba-production-702a.up.railway.app  
+FastAPI가 루트에서 API(`/api`)와 모바일 화면(`/`)을 같이 서빙하고, DB는 Railway MySQL 입니다. 배포 방법은 `RAILWAY.md` 를 보세요.
+
+로컬은 **SQLite** (`data/alba.db`)라 DB 설치 없이 바로 돌아갑니다.
 
 ## 로컬 실행
 
@@ -59,4 +62,4 @@ npm run dev
 
 - FastAPI + PyJWT + bcrypt
 - Vite + TypeScript (모바일 웹)
-- SQLite (로컬) / MariaDB (운영)
+- SQLite (로컬) / Railway MySQL (운영)

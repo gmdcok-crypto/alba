@@ -1,4 +1,4 @@
-"""DB 연결 — 로컬 SQLite, 운영 MariaDB/MySQL (PyMySQL)."""
+"""DB 연결 — 로컬 SQLite, Railway/운영은 MySQL (PyMySQL)."""
 
 from __future__ import annotations
 
@@ -85,6 +85,32 @@ class _MysqlConn:
 Connection = Union[_SqliteConn, _MysqlConn]
 
 
+def on_railway() -> bool:
+    return bool(
+        os.getenv("RAILWAY_ENVIRONMENT")
+        or os.getenv("RAILWAY_SERVICE_NAME")
+        or os.getenv("RAILWAY_PROJECT_ID")
+    )
+
+
+def _env_first(*keys: str) -> str | None:
+    for k in keys:
+        if k in os.environ:
+            return os.environ[k]
+    return None
+
+
+def _db_related_keys_hint() -> str:
+    names = sorted(
+        k
+        for k in os.environ
+        if any(x in k.upper() for x in ("MYSQL", "DATABASE", "DB_", "MARIA", "SQL"))
+    )
+    if not names:
+        return "(DB 관련 환경 변수 이름이 하나도 없습니다.)"
+    return ", ".join(names[:40]) + ("…" if len(names) > 40 else "")
+
+
 def _parse_mysql_url(url: str) -> tuple[str, int, str, str, str] | None:
     if not url or not re.match(r"^(mysql|mariadb)(\+[^:]+)?://", url, re.I):
         return None
@@ -100,38 +126,92 @@ def _parse_mysql_url(url: str) -> tuple[str, int, str, str, str] | None:
     return parsed.hostname, port, user, password, db
 
 
+def _is_public_proxy(host: str) -> bool:
+    h = host.lower()
+    return h.endswith(".proxy.rlwy.net") or h.endswith(".railway.app")
+
+
 def _find_mysql_url() -> tuple[str, int, str, str, str] | None:
-    for key in (
-        "DATABASE_URL",
-        "MYSQL_URL",
+    """사설 URL을 공개 프록시보다 먼저 쓴다."""
+    private_keys = (
         "MYSQL_PRIVATE_URL",
-        "MYSQL_PUBLIC_URL",
-    ):
+        "MYSQL_URL",
+        "DATABASE_PRIVATE_URL",
+        "DATABASE_URL",
+        "MYSQLURL",
+    )
+    public_keys = ("MYSQL_PUBLIC_URL", "DATABASE_PUBLIC_URL")
+    found_public: tuple[str, int, str, str, str] | None = None
+    for key in private_keys + public_keys:
         parsed = _parse_mysql_url(os.getenv(key, ""))
-        if parsed is not None:
-            return parsed
-    return None
+        if parsed is None:
+            continue
+        if _is_public_proxy(parsed[0]) or key in public_keys:
+            found_public = found_public or parsed
+            continue
+        return parsed
+    for _k, v in os.environ.items():
+        if not v or len(v) < 15:
+            continue
+        if not v.startswith(("mysql://", "mariadb://", "mysql+", "mariadb+")):
+            continue
+        parsed = _parse_mysql_url(v)
+        if parsed is None:
+            continue
+        if _is_public_proxy(parsed[0]):
+            found_public = found_public or parsed
+            continue
+        return parsed
+    return found_public
 
 
 def _mysql_params() -> tuple[str, int, str, str, str] | None:
     parsed = _find_mysql_url()
-    if parsed is not None:
-        return parsed
 
-    user = os.getenv("DB_USER") or os.getenv("MYSQLUSER") or os.getenv("MYSQL_USER")
-    database = os.getenv("DB_NAME") or os.getenv("MYSQL_DATABASE") or os.getenv("MYSQLDATABASE")
-    password = os.getenv("DB_PASSWORD")
-    if password is None:
-        password = os.getenv("MYSQLPASSWORD") or os.getenv("MYSQL_PASSWORD")
-    host = os.getenv("DB_HOST") or os.getenv("MYSQLHOST") or os.getenv("MYSQL_HOST")
-    if not user or not database or password is None:
+    mysql_host = os.getenv("MYSQLHOST") or os.getenv("MYSQL_HOST")
+    mysql_port = os.getenv("MYSQLPORT") or os.getenv("MYSQL_PORT")
+    user = (
+        os.getenv("DB_USER")
+        or os.getenv("MYSQLUSER")
+        or os.getenv("MYSQL_USER")
+        or os.getenv("MYSQL_USERNAME")
+    )
+    password = _env_first("DB_PASSWORD", "MYSQLPASSWORD", "MYSQL_PASSWORD")
+    database = _env_first("DB_NAME", "MYSQL_DATABASE", "MYSQLDATABASE")
+    db_host = os.getenv("DB_HOST")
+    db_port = os.getenv("DB_PORT")
+
+    if parsed is not None:
+        host, port, url_user, url_password, url_db = parsed
+        if mysql_host and _is_public_proxy(host):
+            host = mysql_host
+            if mysql_port:
+                try:
+                    port = int(mysql_port)
+                except ValueError:
+                    pass
+        return (
+            host,
+            port,
+            url_user or user or "",
+            url_password if url_password is not None else (password or ""),
+            url_db or database or "",
+        )
+
+    if not user or password is None or not database:
         return None
-    port_str = os.getenv("DB_PORT") or os.getenv("MYSQLPORT") or os.getenv("MYSQL_PORT") or "3306"
+
+    host = mysql_host or db_host or "127.0.0.1"
+    port_str = mysql_port or db_port or "3306"
+    if mysql_host and db_host and _is_public_proxy(db_host):
+        host = mysql_host
+        if mysql_port:
+            port_str = mysql_port
     try:
         port = int(port_str)
     except ValueError:
         port = 3306
-    return host or "127.0.0.1", port, user, password, database
+    return host, port, user, password, database
 
 
 def use_mysql() -> bool:
@@ -141,6 +221,13 @@ def use_mysql() -> bool:
 def get_connection() -> Connection:
     params = _mysql_params()
     if params is None:
+        if on_railway():
+            raise RuntimeError(
+                "Railway에서는 MySQL이 필요합니다. 웹 서비스 Variables에 "
+                "MySQL 서비스 변수를 참조로 넣으세요 "
+                "(MYSQLHOST, MYSQLPORT, MYSQLUSER, MYSQLPASSWORD, MYSQLDATABASE 또는 MYSQL_URL). "
+                f"현재 감지된 관련 키: {_db_related_keys_hint()}"
+            )
         return _SqliteConn(_ROOT / "data" / "alba.db")
 
     import pymysql
@@ -153,9 +240,10 @@ def get_connection() -> Connection:
         password=password,
         database=database,
         charset="utf8mb4",
-        connect_timeout=5,
+        connect_timeout=8,
         read_timeout=30,
         write_timeout=30,
+        init_command="SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci",
     )
     return _MysqlConn(raw)
 
@@ -166,6 +254,7 @@ def get_db() -> Generator[Connection, None, None]:
         if conn.kind == "mysql":
             cur = conn.cursor()
             cur.execute("SET time_zone = '+09:00'")
+            cur.execute("SET NAMES utf8mb4")
         yield conn
     finally:
         conn.close()
