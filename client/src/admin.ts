@@ -42,6 +42,7 @@ let selectedMgrId: number | null = null
 let selectedEmpId: number | null = null
 let selectedEventId: number | null = null
 let rawFilterEmpId: number | null = null
+let rawFilterDeptId: number | null = null
 let liveTimer = 0
 
 function esc(s: string): string {
@@ -804,20 +805,36 @@ function sourceLabel(source: string | null): string {
 async function fillRaw(el: Element): Promise<void> {
   const from = document.querySelector<HTMLInputElement>('#raw-from')?.value || todayStr(-7)
   const to = document.querySelector<HTMLInputElement>('#raw-to')?.value || todayStr()
-  const [empData, evData] = await Promise.all([
+  const deptQ = rawFilterDeptId ? `&department_id=${rawFilterDeptId}` : ''
+  const empQ = rawFilterEmpId ? `&employee_id=${rawFilterEmpId}` : ''
+  const [empData, deptData, evData] = await Promise.all([
     api<{ items: Employee[] }>(`/api/employees?store_id=${store!.id}`),
+    api<{ items: Department[] }>(`/api/departments?store_id=${store!.id}`),
     api<{ items: AttendanceEvent[] }>(
-      `/api/attendance-events?store_id=${store!.id}&date_from=${from}&date_to=${to}${rawFilterEmpId ? `&employee_id=${rawFilterEmpId}` : ''}`,
+      `/api/attendance-events?store_id=${store!.id}&date_from=${from}&date_to=${to}${deptQ}${empQ}`,
     ),
   ])
   const emps = empData.items
+  const depts = deptData.items
   const events = evData.items
   const selectedEv = events.find((e) => e.id === selectedEventId) ?? null
   const occurred = selectedEv?.occurred_at || ''
   const formEmpNo = selectedEv?.employee_no || ''
+  const filterEmps = rawFilterDeptId ? emps.filter((e) => e.department_id === rawFilterDeptId) : emps
+  if (rawFilterEmpId && !filterEmps.some((e) => e.id === rawFilterEmpId)) {
+    rawFilterEmpId = null
+  }
+  const deptFilterOptions = ['<option value="">전체지점</option>']
+    .concat(
+      depts.map(
+        (d) =>
+          `<option value="${d.id}" ${rawFilterDeptId === d.id ? 'selected' : ''}>${esc(d.name)}</option>`,
+      ),
+    )
+    .join('')
   const empFilterOptions = ['<option value="">전체 사원</option>']
     .concat(
-      emps.map(
+      filterEmps.map(
         (e) =>
           `<option value="${e.id}" ${rawFilterEmpId === e.id ? 'selected' : ''}>${esc(e.employee_no)} ${esc(e.name)}</option>`,
       ),
@@ -835,6 +852,7 @@ async function fillRaw(el: Element): Promise<void> {
     <div class="page-toolbar">
       <div class="field"><label>시작일</label><input id="raw-from" type="date" value="${esc(from)}" /></div>
       <div class="field"><label>종료일</label><input id="raw-to" type="date" value="${esc(to)}" /></div>
+      <div class="field"><label>지점</label><select id="raw-dept">${deptFilterOptions}</select></div>
       <div class="field"><label>사원</label><select id="raw-emp">${empFilterOptions}</select></div>
       <button class="btn btn-primary" id="raw-search">조회</button>
     </div>
@@ -902,8 +920,28 @@ async function fillRaw(el: Element): Promise<void> {
     </div>
   `
   const reload = () => void fillRaw(el)
+  document.querySelector('#raw-dept')?.addEventListener('change', () => {
+    const dept = val('raw-dept')
+    rawFilterDeptId = dept ? Number(dept) : null
+    const empSel = document.querySelector<HTMLSelectElement>('#raw-emp')
+    if (!empSel) return
+    const nextEmps = rawFilterDeptId ? emps.filter((e) => e.department_id === rawFilterDeptId) : emps
+    if (rawFilterEmpId && !nextEmps.some((e) => e.id === rawFilterEmpId)) {
+      rawFilterEmpId = null
+    }
+    empSel.innerHTML = ['<option value="">전체 사원</option>']
+      .concat(
+        nextEmps.map(
+          (e) =>
+            `<option value="${e.id}" ${rawFilterEmpId === e.id ? 'selected' : ''}>${esc(e.employee_no)} ${esc(e.name)}</option>`,
+        ),
+      )
+      .join('')
+  })
   document.querySelector('#raw-search')?.addEventListener('click', () => {
+    const dept = val('raw-dept')
     const emp = val('raw-emp')
+    rawFilterDeptId = dept ? Number(dept) : null
     rawFilterEmpId = emp ? Number(emp) : null
     selectedEventId = null
     reload()

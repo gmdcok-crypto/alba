@@ -83,6 +83,7 @@ def list_attendance_events(
     date_from: str,
     date_to: str,
     employee_id: Optional[int] = None,
+    department_id: Optional[int] = None,
     user: dict = Depends(require_owner),
     conn: Connection = Depends(get_db),
 ) -> dict:
@@ -96,6 +97,9 @@ def list_attendance_events(
           AND a.occurred_at >= %s AND a.occurred_at < %s
     """
     params: list[object] = [store_id, f"{date_from[:10]} 00:00:00", f"{date_to[:10]} 23:59:59.999"]
+    if department_id:
+        sql += " AND e.department_id = %s"
+        params.append(int(department_id))
     if employee_id:
         sql += " AND a.employee_id = %s"
         params.append(employee_id)

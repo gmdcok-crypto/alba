@@ -347,6 +347,35 @@ input {
   background: var(--primary-soft);
 }
 
+.data-table.is-static {
+  min-width: 520px;
+}
+
+.data-table.is-static tbody tr {
+  cursor: default;
+}
+
+.filter-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 10px;
+  padding: 4px 16px 12px;
+}
+
+.filter-bar .auth-field {
+  margin: 0;
+}
+
+.filter-bar .auth-field input,
+.filter-bar .auth-field select {
+  padding: 10px 12px;
+  font-size: 0.9375rem;
+}
+
+.filter-bar .span-2 {
+  grid-column: 1 / -1;
+}
+
 .table-link {
   border: none;
   background: none;

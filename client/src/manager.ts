@@ -6,6 +6,7 @@ import {
   moveSession,
   type Employee,
   type Live,
+  type PeriodAttendance,
   type Store,
   type User,
 } from './api'
@@ -16,13 +17,16 @@ const mounted = document.querySelector<HTMLDivElement>('#app')
 if (!mounted) throw new Error('#app missing')
 const root: HTMLDivElement = mounted
 
-type Tab = 'live' | 'emps' | 'more'
+type Tab = 'live' | 'att' | 'emps' | 'more'
 
 let user = getUser()
 let store: Store | null = null
 let tab: Tab = 'live'
 let selectedEmpId: number | null = null
 let liveTimer = 0
+let attFrom = ''
+let attTo = ''
+let attEmpId: number | null = null
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c))
@@ -35,6 +39,11 @@ function val(id: string): string {
 function todayStr(): string {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function monthStartStr(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
 }
 
 async function loadStores(): Promise<void> {
@@ -133,6 +142,7 @@ async function submitAuth(): Promise<void> {
 function renderMain(): void {
   const tabs: [Tab, string][] = [
     ['live', '현황'],
+    ['att', '근태'],
     ['emps', '사원'],
     ['more', '더보기'],
   ]
@@ -164,6 +174,7 @@ async function fillScreen(): Promise<void> {
   const el = document.querySelector('#screen')
   if (!el || !store || !user) return
   if (tab === 'live') await fillLive(el)
+  else if (tab === 'att') await fillAtt(el)
   else if (tab === 'emps') await fillEmps(el)
   else fillMore(el)
 }
@@ -232,6 +243,101 @@ async function fillLive(el: Element): Promise<void> {
     }, 15_000)
   } catch (e) {
     const body = document.querySelector('#live-body')
+    if (body) body.innerHTML = `<p class="empty">${e instanceof Error ? e.message : '실패'}</p>`
+  }
+}
+
+async function fillAtt(el: Element): Promise<void> {
+  if (!attFrom) attFrom = monthStartStr()
+  if (!attTo) attTo = todayStr()
+  const branch = user?.department_name || store?.name || ''
+  let emps: Employee[] = []
+  try {
+    const empData = await api<{ items: Employee[] }>(`/api/employees?store_id=${store!.id}`)
+    emps = empData.items
+  } catch {
+    emps = []
+  }
+  const empOptions = ['<option value="">전체 사원</option>']
+    .concat(
+      emps.map(
+        (e) =>
+          `<option value="${e.id}" ${attEmpId === e.id ? 'selected' : ''}>${esc(e.employee_no)} ${esc(e.name)}</option>`,
+      ),
+    )
+    .join('')
+  el.innerHTML = `
+    <header class="screen-header">
+      <h1>근태현황</h1>
+      <p class="sub">${esc(branch)} · 기간별 출퇴근</p>
+    </header>
+    <div class="filter-bar">
+      <div class="auth-field"><label>시작일</label><input id="att-from" type="date" value="${esc(attFrom)}" /></div>
+      <div class="auth-field"><label>종료일</label><input id="att-to" type="date" value="${esc(attTo)}" /></div>
+      <div class="auth-field span-2"><label>사원</label><select id="att-emp">${empOptions}</select></div>
+      <button class="btn-primary span-2" type="button" id="att-search" style="margin:0;min-height:44px">조회</button>
+    </div>
+    <div id="att-body"><p class="empty">불러오는 중…</p></div>
+  `
+  const paint = async () => {
+    if (!store) return
+    const empQ = attEmpId ? `&employee_id=${attEmpId}` : ''
+    const data = await api<PeriodAttendance>(
+      `/api/owner/${store.id}/period?date_from=${attFrom}&date_to=${attTo}${empQ}`,
+    )
+    const body = document.querySelector('#att-body')
+    if (!body) return
+    body.innerHTML = `
+      <div class="summary-row">
+        <div class="summary-card"><div class="k">기록</div><div class="v">${data.items.length}건</div></div>
+        <div class="summary-card"><div class="k">총 근무</div><div class="v">${esc(data.hours_label)}</div></div>
+      </div>
+      ${
+        data.items.length
+          ? `<div class="table-scroll">
+          <table class="data-table is-static">
+            <thead>
+              <tr>
+                <th>날짜</th>
+                <th>사번</th>
+                <th>이름</th>
+                <th>출근</th>
+                <th>퇴근</th>
+                <th>근무</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${data.items
+                .map(
+                  (r) => `
+                <tr>
+                  <td>${esc(r.date)}</td>
+                  <td>${esc(r.employee_no)}</td>
+                  <td>${esc(r.name)}</td>
+                  <td>${hhmm(r.in_at)}</td>
+                  <td>${r.open ? '미퇴근' : hhmm(r.out_at)}</td>
+                  <td>${esc(r.hours_label)}</td>
+                </tr>`,
+                )
+                .join('')}
+            </tbody>
+          </table>
+        </div>`
+          : '<p class="empty" style="margin:12px 20px">해당 기간 출퇴근 기록이 없습니다.</p>'
+      }
+    `
+  }
+  el.querySelector('#att-search')?.addEventListener('click', () => {
+    attFrom = val('att-from') || monthStartStr()
+    attTo = val('att-to') || todayStr()
+    const emp = val('att-emp')
+    attEmpId = emp ? Number(emp) : null
+    void fillAtt(el)
+  })
+  try {
+    await paint()
+  } catch (e) {
+    const body = document.querySelector('#att-body')
     if (body) body.innerHTML = `<p class="empty">${e instanceof Error ? e.message : '실패'}</p>`
   }
 }

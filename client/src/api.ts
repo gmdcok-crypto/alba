@@ -99,6 +99,26 @@ export type Records = {
   sessions: SessionRow[]
 }
 
+export type PeriodRow = {
+  date: string
+  employee_id: number
+  employee_no: string
+  name: string
+  in_at: string | null
+  out_at: string | null
+  open: boolean
+  minutes: number
+  hours_label: string
+}
+
+export type PeriodAttendance = {
+  date_from: string
+  date_to: string
+  minutes: number
+  hours_label: string
+  items: PeriodRow[]
+}
+
 export type Live = {
   date: string
   working: {

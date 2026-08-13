@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timedelta
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -90,15 +92,18 @@ def day_records(
     start = day.strftime("%Y-%m-%d") + " 00:00:00"
     end = nxt + " 00:00:00"
     cur = conn.cursor()
-    cur.execute(
-        """
+    dept_id = manager_department_id(user)
+    sql = """
         SELECT e.id AS employee_id, e.name, e.hourly_wage
         FROM employees e
         WHERE e.store_id = %s AND e.status <> '퇴사'
-        ORDER BY e.name ASC
-        """,
-        (store_id,),
-    )
+    """
+    params: list[object] = [store_id]
+    if dept_id is not None:
+        sql += " AND e.department_id = %s"
+        params.append(dept_id)
+    sql += " ORDER BY e.name ASC"
+    cur.execute(sql, tuple(params))
     members = cur.fetchall() or []
     items = []
     for mem in members:
@@ -139,3 +144,115 @@ def day_records(
             }
         )
     return {"date": date[:10], "items": items}
+
+
+def _occurred_day(value: object) -> str:
+    parsed = value if isinstance(value, datetime) else None
+    if parsed is None:
+        text = str(value).replace("T", " ")
+        return text[:10]
+    return parsed.strftime("%Y-%m-%d")
+
+
+@router.get("/{store_id}/period")
+def period_records(
+    store_id: int,
+    date_from: str,
+    date_to: str,
+    employee_id: Optional[int] = None,
+    user: dict = Depends(get_current_user),
+    conn: Connection = Depends(get_db),
+) -> dict:
+    _require_owner_store(conn, store_id, user)
+    try:
+        start_day = datetime.strptime(date_from[:10], "%Y-%m-%d")
+        end_day = datetime.strptime(date_to[:10], "%Y-%m-%d")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="날짜 형식이 올바르지 않습니다.") from e
+    if end_day < start_day:
+        raise HTTPException(status_code=400, detail="종료일이 시작일보다 빠릅니다.")
+    if (end_day - start_day).days > 92:
+        raise HTTPException(status_code=400, detail="조회 기간은 93일 이하여야 합니다.")
+
+    start = start_day.strftime("%Y-%m-%d") + " 00:00:00"
+    end = (end_day + timedelta(days=1)).strftime("%Y-%m-%d") + " 00:00:00"
+    today = now_kst().strftime("%Y-%m-%d")
+    dept_id = manager_department_id(user)
+    cur = conn.cursor()
+    sql = """
+        SELECT e.id AS employee_id, e.employee_no, e.name
+        FROM employees e
+        WHERE e.store_id = %s
+    """
+    params: list[object] = [store_id]
+    if dept_id is not None:
+        sql += " AND e.department_id = %s"
+        params.append(dept_id)
+    if employee_id:
+        sql += " AND e.id = %s"
+        params.append(int(employee_id))
+    sql += " ORDER BY e.name ASC"
+    cur.execute(sql, tuple(params))
+    members = cur.fetchall() or []
+    emp_ids = [int(m["employee_id"]) for m in members]
+    empty = {
+        "date_from": date_from[:10],
+        "date_to": date_to[:10],
+        "minutes": 0,
+        "hours_label": minutes_to_hours_label(0),
+        "items": [],
+    }
+    if not emp_ids:
+        return empty
+
+    placeholders = ",".join(["%s"] * len(emp_ids))
+    cur.execute(
+        f"""
+        SELECT employee_id, event_type, occurred_at
+        FROM attendance_events
+        WHERE store_id = %s AND employee_id IN ({placeholders})
+          AND occurred_at >= %s AND occurred_at < %s
+        ORDER BY employee_id ASC, occurred_at ASC, id ASC
+        """,
+        tuple([store_id, *emp_ids, start, end]),
+    )
+    grouped: dict[tuple[int, str], list] = defaultdict(list)
+    for ev in cur.fetchall() or []:
+        grouped[(int(ev["employee_id"]), _occurred_day(ev["occurred_at"]))].append(ev)
+
+    emp_map = {int(m["employee_id"]): m for m in members}
+    items = []
+    total_minutes = 0
+    for (eid, day), evs in grouped.items():
+        mem = emp_map.get(eid)
+        if not mem:
+            continue
+        if day == today:
+            cap = now_kst()
+        else:
+            cap = datetime.strptime(f"{day} 23:59:59", "%Y-%m-%d %H:%M:%S")
+        for sess in pair_sessions(evs, until=cap):
+            minutes = int(sess["minutes"])
+            total_minutes += minutes
+            items.append(
+                {
+                    "date": day,
+                    "employee_id": eid,
+                    "employee_no": mem["employee_no"],
+                    "name": mem["name"],
+                    "in_at": dt_iso(sess["in_at"]),
+                    "out_at": dt_iso(sess["out_at"]),
+                    "open": bool(sess["open"]),
+                    "minutes": minutes,
+                    "hours_label": minutes_to_hours_label(minutes),
+                }
+            )
+    items.sort(key=lambda r: (r["name"], r["in_at"] or ""))
+    items.sort(key=lambda r: r["date"], reverse=True)
+    return {
+        "date_from": date_from[:10],
+        "date_to": date_to[:10],
+        "minutes": total_minutes,
+        "hours_label": minutes_to_hours_label(total_minutes),
+        "items": items,
+    }
