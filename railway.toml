@@ -1,11 +1,12 @@
 # Railway — Nixpacks만 사용 (Dockerfile / Railpack 자동 Docker 빌드 사용 안 함)
 # 대시보드 Settings → Build → Builder = Nixpacks
-# https://docs.railway.com/reference/config-as-code
 
 [build]
 builder = "NIXPACKS"
-# 프론트(client/dist) 빌드 후 FastAPI 의존성 설치. 한 서비스가 / 와 /api 를 같이 서빙한다.
-buildCommand = "cd client && npm install --include=optional && npm install --no-save vite@6.4.1 && npx tsc && npx vite build && cd .. && pip install --no-cache-dir -r requirements.txt"
+# pip 는 Nixpacks Python 설치 단계에서 이미 함. 여기서 다시 깔지 않음.
+# NODE_ENV=production 이면 vite/tsc 가 빠지므로 --include=dev 로 프론트 빌드.
+# tsc 는 noEmit 타입체크라 배포에 필요 없음. vite build 만 함.
+buildCommand = "cd client && npm ci --include=dev && npx vite build"
 
 [deploy]
 startCommand = "uvicorn backend.main:app --host 0.0.0.0 --port $PORT --log-level warning"

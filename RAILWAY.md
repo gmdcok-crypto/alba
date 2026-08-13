@@ -16,7 +16,9 @@
 
 빌더는 **Nixpacks** 만 씁니다. Settings → Build → Builder = **Nixpacks** (Dockerfile / Railpack 아님).
 
-`railway.toml` 이 프론트를 빌드한 뒤 `uvicorn backend.main:app` 으로 띄웁니다.
+`railway.toml` 이 프론트(`vite build`)만 돌리고, Python 패키지는 Nixpacks 설치 단계에서 한 번만 깔립니다.
+
+빌드가 길었던 이유: Python+Node 런타임을 같이 받고, `vite`/`tsc`/`pip`를 빌드 명령에서 **또** 설치하고 있었습니다. 배포용 명령은 `npm ci` + `vite build` 만 남겼습니다.
 
 ## MySQL 연결 (웹 서비스 Variables)
 

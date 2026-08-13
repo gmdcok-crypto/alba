@@ -1,6 +1,8 @@
 [variables]
 NIXPACKS_PYTHON_VERSION = "3.12"
 NIXPACKS_NODE_VERSION = "22"
+# 프론트 빌드에 vite(devDependency)가 필요함
+NPM_CONFIG_PRODUCTION = "false"
 
 [phases.setup]
 nixPkgs = ["...", "nodejs_22"]
