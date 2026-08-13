@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -20,7 +21,7 @@ class ManagerCreate(BaseModel):
     department_name: str = Field(..., min_length=1)
     login_id: str = Field(..., min_length=3, max_length=64)
     name: str = Field(..., min_length=1, max_length=64)
-    password: str = Field(..., min_length=4, max_length=72)
+    password: Optional[str] = None
 
 
 class ManagerUpdate(BaseModel):
@@ -56,7 +57,7 @@ def _load_manager(conn: Connection, mgr_id: int) -> dict:
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT bm.id, bm.store_id, bm.department_id, bm.user_id,
+        SELECT bm.id, bm.store_id, bm.department_id, bm.user_id, bm.auth_status,
                u.login_id, u.name, d.name AS department_name, d.code AS department_code
         FROM branch_managers bm
         JOIN users u ON u.id = bm.user_id
@@ -82,7 +83,7 @@ def list_managers(
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT bm.id, bm.store_id, bm.department_id, bm.user_id,
+        SELECT bm.id, bm.store_id, bm.department_id, bm.user_id, bm.auth_status,
                u.login_id, u.name, d.name AS department_name, d.code AS department_code
         FROM branch_managers bm
         JOIN users u ON u.id = bm.user_id
@@ -92,7 +93,15 @@ def list_managers(
         """,
         (store_id,),
     )
-    return {"items": cur.fetchall() or []}
+    items = []
+    for row in cur.fetchall() or []:
+        items.append(
+            {
+                **row,
+                "auth_label": "인증" if str(row.get("auth_status") or "") == "O" else "미인증",
+            }
+        )
+    return {"items": items}
 
 
 @router.post("", status_code=201)
@@ -116,21 +125,24 @@ def create_manager(
     if cur.fetchone():
         raise HTTPException(status_code=409, detail="이미 점장이 등록된 지점입니다.")
     now = now_kst_str()
+    pwd = (body.password or "").strip()
+    auth_status = "O" if len(pwd) >= 4 else "X"
+    pwd_hash = hash_password(pwd) if auth_status == "O" else hash_password(uuid.uuid4().hex)
     try:
         cur.execute(
             """
             INSERT INTO users (login_id, name, password_hash, role, created_at)
             VALUES (%s, %s, %s, 'manager', %s)
             """,
-            (login_id, name, hash_password(body.password), now),
+            (login_id, name, pwd_hash, now),
         )
         user_id = int(cur.lastrowid)
         cur.execute(
             """
-            INSERT INTO branch_managers (store_id, department_id, user_id)
-            VALUES (%s, %s, %s)
+            INSERT INTO branch_managers (store_id, department_id, user_id, auth_status)
+            VALUES (%s, %s, %s, %s)
             """,
-            (body.store_id, dept["id"], user_id),
+            (body.store_id, dept["id"], user_id, auth_status),
         )
         new_id = int(cur.lastrowid)
         cur.execute(
@@ -180,19 +192,48 @@ def update_manager(
                 """,
                 (login_id, name, hash_password(body.password.strip()), row["user_id"]),
             )
+            cur.execute(
+                "UPDATE branch_managers SET department_id=%s, auth_status='O' WHERE id=%s",
+                (dept["id"], mgr_id),
+            )
         else:
             cur.execute(
                 "UPDATE users SET login_id=%s, name=%s WHERE id=%s",
                 (login_id, name, row["user_id"]),
             )
-        cur.execute(
-            "UPDATE branch_managers SET department_id=%s WHERE id=%s",
-            (dept["id"], mgr_id),
-        )
+            cur.execute(
+                "UPDATE branch_managers SET department_id=%s WHERE id=%s",
+                (dept["id"], mgr_id),
+            )
         conn.commit()
     except IntegrityError as e:
         conn.rollback()
         raise HTTPException(status_code=409, detail="점장 수정에 실패했습니다.") from e
+    return {"ok": True}
+
+
+@router.post("/{mgr_id}/revoke-auth")
+def revoke_manager_auth(
+    mgr_id: int,
+    user: dict = Depends(require_owner),
+    conn: Connection = Depends(get_db),
+) -> dict:
+    row = _load_manager(conn, mgr_id)
+    _require_store_owner(conn, int(row["store_id"]), user)
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET password_hash=%s WHERE id=%s",
+        (hash_password(uuid.uuid4().hex), row["user_id"]),
+    )
+    cur.execute(
+        "UPDATE branch_managers SET auth_status='X' WHERE id=%s",
+        (mgr_id,),
+    )
+    cur.execute(
+        "UPDATE refresh_tokens SET revoked = 1 WHERE user_id = %s AND revoked = 0",
+        (row["user_id"],),
+    )
+    conn.commit()
     return {"ok": True}
 
 

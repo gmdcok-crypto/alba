@@ -134,7 +134,7 @@ function renderAuth(): void {
       <div class="auth-esl-card">
         <h1>알바근태 관리자</h1>
         <p>${isSignup ? '사장님 계정을 만들고 회사를 등록하세요.' : '사장님 또는 점장 아이디로 로그인하세요.'}</p>
-        ${isSignup ? `<div class="field"><label>이름</label><input id="name" autocomplete="name" /></div>` : ''}
+        <div class="field" style="margin-top:10px"><label>이름</label><input id="name" autocomplete="name" placeholder="${isSignup ? '' : '점장 첫 로그인·인증취소 시 필수'}" /></div>
         <div class="field" style="margin-top:10px"><label>아이디</label><input id="login_id" autocomplete="username" /></div>
         <div class="field" style="margin-top:10px"><label>비밀번호</label><input id="password" type="password" autocomplete="${isSignup ? 'new-password' : 'current-password'}" /></div>
         <p class="auth-error" id="auth-error" hidden></p>
@@ -160,7 +160,7 @@ async function submitAuth(): Promise<void> {
     const body =
       authMode === 'signup'
         ? { login_id: val('login_id'), password: val('password'), name: val('name'), role: 'owner' as const }
-        : { login_id: val('login_id'), password: val('password') }
+        : { login_id: val('login_id'), password: val('password'), name: val('name') }
     const data = await api<{ access_token: string; refresh_token: string; user: User }>(path, {
       method: 'POST',
       body: JSON.stringify(body),
@@ -497,7 +497,7 @@ async function fillManagers(el: Element): Promise<void> {
         ${
           items.length
             ? `<table class="data-table">
-            <thead><tr><th>아이디</th><th>이름</th><th>지점</th></tr></thead>
+            <thead><tr><th>아이디</th><th>이름</th><th>지점</th><th>인증</th><th></th></tr></thead>
             <tbody>
               ${items
                 .map(
@@ -506,6 +506,12 @@ async function fillManagers(el: Element): Promise<void> {
                   <td>${esc(m.login_id)}</td>
                   <td>${esc(m.name)}</td>
                   <td>${esc(m.department_name)}</td>
+                  <td><span class="badge ${m.auth_status === 'O' ? 'badge-ok' : 'badge-warn'}">${esc(m.auth_label)}</span></td>
+                  <td>
+                    <div class="row-actions">
+                      <button type="button" class="btn" data-revoke="${m.id}">인증취소</button>
+                    </div>
+                  </td>
                 </tr>`,
                 )
                 .join('')}
@@ -518,7 +524,7 @@ async function fillManagers(el: Element): Promise<void> {
         <div class="panel-hd">
           <div>
             <h3>${selected ? '점장 수정' : '점장 등록'}</h3>
-            <p>점장은 해당 지점 사원만 등록할 수 있습니다.</p>
+            <p>비밀번호를 비우면 점장이 이름+아이디로 첫 로그인하며 설정합니다.</p>
           </div>
         </div>
         <form class="crud-form" id="mgr-form">
@@ -526,7 +532,7 @@ async function fillManagers(el: Element): Promise<void> {
             <div class="field"><label>지점</label><select id="mgr-dept">${deptOptions}</select></div>
             <div class="field"><label>이름</label><input id="mgr-name" value="${esc(selected?.name || '')}" /></div>
             <div class="field"><label>아이디</label><input id="mgr-login" value="${esc(selected?.login_id || '')}" autocomplete="off" /></div>
-            <div class="field"><label>비밀번호</label><input id="mgr-password" type="password" autocomplete="new-password" placeholder="${selected ? '변경 시에만 입력' : ''}" /></div>
+            <div class="field"><label>비밀번호</label><input id="mgr-password" type="password" autocomplete="new-password" placeholder="${selected ? '변경 시에만 입력' : '비우면 점장이 첫 로그인 시 설정'}" /></div>
           </div>
           <div class="form-actions">
             <button class="btn btn-primary" type="button" id="mgr-create">등록</button>
@@ -540,15 +546,26 @@ async function fillManagers(el: Element): Promise<void> {
   const reload = () => void fillManagers(el)
   el.querySelector('#mgr-form')?.addEventListener('submit', (ev) => ev.preventDefault())
   el.querySelectorAll<HTMLTableRowElement>('tr[data-id]').forEach((row) => {
-    row.addEventListener('click', () => {
+    row.addEventListener('click', (ev) => {
+      if ((ev.target as HTMLElement).closest('button')) return
       selectedMgrId = Number(row.dataset.id)
       reload()
     })
   })
+  el.querySelectorAll<HTMLButtonElement>('[data-revoke]').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      const id = Number(btn.dataset.revoke)
+      if (!window.confirm('점장 인증을 취소할까요? 다시 이름·아이디로 비밀번호를 설정해야 합니다.')) return
+      void api(`/api/managers/${id}/revoke-auth`, { method: 'POST' })
+        .then(() => reload())
+        .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
+    })
+  })
   el.querySelector('#mgr-create')?.addEventListener('click', () => {
     const password = val('mgr-password')
-    if (!val('mgr-dept') || !val('mgr-name') || !val('mgr-login') || !password) {
-      window.alert('지점, 이름, 아이디, 비밀번호를 입력하세요.')
+    if (!val('mgr-dept') || !val('mgr-name') || !val('mgr-login')) {
+      window.alert('지점, 이름, 아이디를 입력하세요.')
       return
     }
     void api('/api/managers', {
@@ -558,7 +575,7 @@ async function fillManagers(el: Element): Promise<void> {
         department_name: val('mgr-dept'),
         name: val('mgr-name'),
         login_id: val('mgr-login'),
-        password,
+        password: password || null,
       }),
     })
       .then(() => {

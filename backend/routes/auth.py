@@ -35,6 +35,7 @@ class WorkerLoginBody(BaseModel):
 class LoginBody(BaseModel):
     login_id: str
     password: str
+    name: str = ""
 
 
 class RefreshBody(BaseModel):
@@ -155,7 +156,33 @@ def login(body: LoginBody, conn: Connection = Depends(get_db)) -> dict:
         (body.login_id.strip(),),
     )
     row = cur.fetchone()
-    if not row or not verify_password(body.password, str(row["password_hash"])):
+    if not row:
+        raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
+    if str(row.get("role") or "") == "manager":
+        scope = manager_scope(conn, int(row["id"]))
+        auth_status = str((scope or {}).get("auth_status") or "X")
+        if auth_status != "O":
+            name = body.name.strip()
+            if not name:
+                raise HTTPException(
+                    status_code=401,
+                    detail="처음 로그인하거나 인증이 취소된 경우 이름과 새 비밀번호를 입력하세요.",
+                )
+            if name != str(row.get("name") or ""):
+                raise HTTPException(status_code=401, detail="아이디 또는 이름이 올바르지 않습니다.")
+            if len(body.password) < 4:
+                raise HTTPException(status_code=400, detail="비밀번호는 4자 이상이어야 합니다.")
+            cur.execute(
+                "UPDATE users SET password_hash=%s WHERE id=%s",
+                (hash_password(body.password), row["id"]),
+            )
+            cur.execute(
+                "UPDATE branch_managers SET auth_status='O' WHERE user_id=%s",
+                (row["id"],),
+            )
+            conn.commit()
+            return _token_pair(conn, row)
+    if not verify_password(body.password, str(row["password_hash"])):
         raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
     return _token_pair(conn, row)
 

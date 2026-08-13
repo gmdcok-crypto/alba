@@ -114,6 +114,7 @@ _SQLITE_DDL = [
       store_id INTEGER NOT NULL,
       department_id INTEGER NOT NULL,
       user_id INTEGER NOT NULL,
+      auth_status TEXT NOT NULL DEFAULT 'X',
       UNIQUE (department_id),
       UNIQUE (user_id),
       FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE,
@@ -242,6 +243,7 @@ _MYSQL_DDL = [
       store_id BIGINT UNSIGNED NOT NULL,
       department_id BIGINT UNSIGNED NOT NULL,
       user_id BIGINT UNSIGNED NOT NULL,
+      auth_status CHAR(1) NOT NULL DEFAULT 'X',
       PRIMARY KEY (id),
       UNIQUE KEY uk_bm_dept (department_id),
       UNIQUE KEY uk_bm_user (user_id),
@@ -285,6 +287,21 @@ def ensure_schema(conn: Connection) -> None:
         "employee_id INTEGER NULL",
         "employee_id BIGINT UNSIGNED NULL",
     )
+    had_mgr_auth = True
+    try:
+        had_mgr_auth = "auth_status" in _column_names(conn, "branch_managers")
+    except Exception:
+        had_mgr_auth = True
+    _add_column_if_missing(
+        conn,
+        "branch_managers",
+        "auth_status",
+        "auth_status TEXT NOT NULL DEFAULT 'X'",
+        "auth_status CHAR(1) NOT NULL DEFAULT 'X'",
+    )
+    if not had_mgr_auth:
+        cur = conn.cursor()
+        cur.execute("UPDATE branch_managers SET auth_status = 'O'")
     conn.commit()
     cur = conn.cursor()
     try:

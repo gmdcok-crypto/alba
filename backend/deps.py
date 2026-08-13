@@ -49,6 +49,8 @@ def get_current_user(
         scope = manager_scope(conn, int(row["id"]))
         if not scope:
             raise HTTPException(status_code=401, detail="배정된 지점이 없습니다. 관리자에게 문의하세요.")
+        if str(scope.get("auth_status") or "") != "O":
+            raise HTTPException(status_code=401, detail="인증이 취소되었습니다. 관리자에게 문의하세요.")
         row.update(scope)
     return row
 
@@ -100,7 +102,8 @@ def manager_scope(conn: Connection, user_id: int) -> dict[str, Any] | None:
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT bm.store_id, bm.department_id, d.name AS department_name, s.name AS store_name
+        SELECT bm.store_id, bm.department_id, bm.auth_status,
+               d.name AS department_name, s.name AS store_name
         FROM branch_managers bm
         JOIN departments d ON d.id = bm.department_id
         JOIN stores s ON s.id = bm.store_id

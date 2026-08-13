@@ -23,6 +23,8 @@ export type Manager = {
   name: string
   department_name: string
   department_code: string
+  auth_status: string
+  auth_label: string
 }
 
 export type Department = {
