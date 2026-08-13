@@ -50,7 +50,7 @@ function renderLogin(): void {
       <input id="password" type="password" placeholder="비밀번호" autocomplete="current-password" />
       <p class="tablet-err" id="err" hidden></p>
       <button type="button" id="go">로그인</button>
-      <a href="/admin.html">관리자 PWA로</a>
+      <a href="/admin.html">본사관리자 PWA로</a>
     </div>
   `
   document.querySelector('#go')?.addEventListener('click', () => void submitLogin())

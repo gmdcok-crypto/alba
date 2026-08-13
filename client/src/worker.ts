@@ -94,7 +94,7 @@ function renderAuth(): void {
         <div class="auth-field"><label>비밀번호</label><input id="password" type="password" autocomplete="current-password" /></div>
         <p class="auth-error" id="auth-error" hidden></p>
         <button class="btn-primary auth-submit" id="auth-submit">로그인</button>
-        <a class="auth-switch" href="/admin.html" style="display:block;text-align:center;text-decoration:none;margin-top:8px">사장님이신가요?</a>
+        <a class="auth-switch" href="/admin.html" style="display:block;text-align:center;text-decoration:none;margin-top:8px">본사관리자이신가요?</a>
       </div>
     </div>
   `

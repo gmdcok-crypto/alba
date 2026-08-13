@@ -212,11 +212,33 @@ export function createSession(prefix: string, refreshPath = '/api/auth/refresh')
     return data as T
   }
 
-  return { getUser, setSession, clearSession, getStoreId, setStoreId, api, STORE_KEY }
+  function getTokens(): { access: string; refresh: string } | null {
+    const access = localStorage.getItem(ACCESS_KEY)
+    const refresh = localStorage.getItem(REFRESH_KEY)
+    if (!access || !refresh) return null
+    return { access, refresh }
+  }
+
+  return { getUser, setSession, clearSession, getStoreId, setStoreId, getTokens, api, STORE_KEY }
 }
 
 export const workerSession = createSession('alba_worker', '/api/auth/worker/refresh')
 export const adminSession = createSession('alba_admin')
+export const managerSession = createSession('alba_manager')
+
+export function moveSession(
+  from: ReturnType<typeof createSession>,
+  to: ReturnType<typeof createSession>,
+): boolean {
+  const user = from.getUser()
+  const tokens = from.getTokens()
+  if (!user || !tokens) return false
+  to.setSession(tokens.access, tokens.refresh, user)
+  const sid = from.getStoreId()
+  if (sid) to.setStoreId(sid)
+  from.clearSession()
+  return true
+}
 
 export function money(n: number): string {
   return `${n.toLocaleString('ko-KR')}원`

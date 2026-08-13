@@ -2,6 +2,8 @@ import './admin.css'
 import {
   adminSession,
   hhmm,
+  managerSession,
+  moveSession,
   type AttendanceEvent,
   type Department,
   type Employee,
@@ -105,6 +107,7 @@ function render(): void {
     return
   }
   if (user.role === 'manager') {
+    moveSession(adminSession, managerSession)
     window.location.replace('/manager.html')
     return
   }
@@ -124,7 +127,7 @@ function renderAuth(): void {
   root.innerHTML = `
     <div class="auth-esl">
       <div class="auth-esl-card">
-        <h1>알바근태 관리자</h1>
+        <h1>알바근태 본사관리자</h1>
         <p>${isSignup ? '사장님 계정을 만들고 회사를 등록하세요.' : '사장님 또는 점장 아이디로 로그인하세요.'}</p>
         <div class="field" style="margin-top:10px"><label>이름</label><input id="name" autocomplete="name" placeholder="${isSignup ? '' : '점장 첫 로그인·인증취소 시 필수'}" /></div>
         <div class="field" style="margin-top:10px"><label>아이디</label><input id="login_id" autocomplete="username" /></div>
@@ -159,7 +162,7 @@ async function submitAuth(): Promise<void> {
       body: JSON.stringify(body),
     })
     if (data.user.role === 'manager') {
-      setSession(data.access_token, data.refresh_token, data.user)
+      managerSession.setSession(data.access_token, data.refresh_token, data.user)
       window.location.replace('/manager.html')
       return
     }
@@ -253,7 +256,7 @@ function renderShell(): void {
         <header class="admin-esl-topbar">
           <div>
             <h2>${VIEW_TITLE[view]}</h2>
-            <p>${esc(user?.name || '')} · ${isManager() ? `점장${user?.department_name ? ` · ${user.department_name}` : ''}` : '관리자'}</p>
+            <p>${esc(user?.name || '')} · ${isManager() ? `점장${user?.department_name ? ` · ${user.department_name}` : ''}` : '본사관리자'}</p>
           </div>
           <div class="admin-user">${esc(isManager() ? user?.department_name || store?.name || '' : store?.name || '')}</div>
         </header>

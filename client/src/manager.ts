@@ -2,13 +2,15 @@ import './style.css'
 import {
   adminSession,
   hhmm,
+  managerSession,
+  moveSession,
   type Employee,
   type Live,
   type Store,
   type User,
 } from './api'
 
-const { api, getUser, setSession, clearSession, getStoreId, setStoreId } = adminSession
+const { api, getUser, setSession, clearSession, getStoreId, setStoreId } = managerSession
 
 const mounted = document.querySelector<HTMLDivElement>('#app')
 if (!mounted) throw new Error('#app missing')
@@ -58,12 +60,8 @@ function render(): void {
     renderAuth()
     return
   }
-  if (user.role === 'owner') {
-    window.location.replace('/admin.html')
-    return
-  }
   if (user.role !== 'manager') {
-    window.location.replace('/')
+    logout()
     return
   }
   if (!store) {
@@ -92,7 +90,7 @@ function renderAuth(): void {
         <div class="auth-field"><label>비밀번호</label><input id="password" type="password" autocomplete="current-password" /></div>
         <p class="auth-error" id="auth-error" hidden></p>
         <button class="btn-primary auth-submit" id="auth-submit">로그인</button>
-        <a class="auth-switch" href="/admin.html" style="display:block;text-align:center;text-decoration:none;margin-top:8px">사장님이신가요?</a>
+        <a class="auth-switch" href="/admin.html" style="display:block;text-align:center;text-decoration:none;margin-top:8px">본사관리자이신가요?</a>
         <a class="auth-switch" href="/" style="display:block;text-align:center;text-decoration:none">알바 출퇴근으로</a>
       </div>
     </div>
@@ -112,7 +110,7 @@ async function submitAuth(): Promise<void> {
       }),
     })
     if (data.user.role === 'owner') {
-      setSession(data.access_token, data.refresh_token, data.user)
+      adminSession.setSession(data.access_token, data.refresh_token, data.user)
       window.location.replace('/admin.html')
       return
     }
@@ -381,7 +379,15 @@ function fillMore(el: Element): void {
   document.querySelector('#logout')?.addEventListener('click', logout)
 }
 
+function adoptManagerLoginFromAdmin(): void {
+  if (getUser()) return
+  if (adminSession.getUser()?.role !== 'manager') return
+  moveSession(adminSession, managerSession)
+}
+
 async function boot(): Promise<void> {
+  adoptManagerLoginFromAdmin()
+  user = getUser()
   if (user) {
     try {
       user = await api<User>('/api/auth/me')
