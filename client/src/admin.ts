@@ -6,6 +6,7 @@ import {
   type Department,
   type Employee,
   type Live,
+  type Manager,
   type Store,
   type User,
 } from './api'
@@ -16,11 +17,12 @@ const mounted = document.querySelector<HTMLDivElement>('#app')
 if (!mounted) throw new Error('#app missing')
 const root: HTMLDivElement = mounted
 
-type View = 'dashboard' | 'company' | 'depts' | 'emps' | 'raw' | 'qr'
+type View = 'dashboard' | 'company' | 'depts' | 'managers' | 'emps' | 'raw' | 'qr'
 const VIEW_TITLE: Record<View, string> = {
   dashboard: '대시보드',
   company: '회사등록',
   depts: '지점관리',
+  managers: '점장관리',
   emps: '사원관리',
   raw: '원시데이터',
   qr: '출근 QR',
@@ -34,6 +36,7 @@ let authMode: 'login' | 'signup' = 'login'
 let qrDrawTimer = 0
 let qrTickTimer = 0
 let selectedDeptId: number | null = null
+let selectedMgrId: number | null = null
 let selectedEmpId: number | null = null
 let selectedEventId: number | null = null
 let rawFilterEmpId: number | null = null
@@ -80,6 +83,19 @@ function val(id: string): string {
   return (document.querySelector<HTMLInputElement | HTMLSelectElement>(`#${id}`)?.value || '').trim()
 }
 
+function isOwner(): boolean {
+  return user?.role === 'owner'
+}
+
+function isManager(): boolean {
+  return user?.role === 'manager'
+}
+
+function allowedViews(): View[] {
+  if (isManager()) return ['dashboard', 'emps']
+  return ['dashboard', 'company', 'depts', 'managers', 'emps', 'raw', 'qr']
+}
+
 function render(): void {
   window.clearInterval(qrDrawTimer)
   window.clearInterval(qrTickTimer)
@@ -88,11 +104,23 @@ function render(): void {
     renderAuth()
     return
   }
-  if (user.role !== 'owner') {
+  if (user.role !== 'owner' && user.role !== 'manager') {
     window.location.replace('/')
     return
   }
   if (!store) {
+    if (isManager()) {
+      root.innerHTML = `
+        <div class="auth-esl">
+          <div class="auth-esl-card">
+            <h1>지점이 없습니다</h1>
+            <p>배정된 매장을 찾을 수 없습니다. 관리자에게 문의하세요.</p>
+            <button class="auth-switch" id="logout">로그아웃</button>
+          </div>
+        </div>`
+      root.querySelector('#logout')?.addEventListener('click', logout)
+      return
+    }
     renderOnboard()
     return
   }
@@ -105,7 +133,7 @@ function renderAuth(): void {
     <div class="auth-esl">
       <div class="auth-esl-card">
         <h1>알바근태 관리자</h1>
-        <p>${isSignup ? '사장님 계정을 만들고 회사를 등록하세요.' : '아이디와 비밀번호로 로그인하세요.'}</p>
+        <p>${isSignup ? '사장님 계정을 만들고 회사를 등록하세요.' : '사장님 또는 점장 아이디로 로그인하세요.'}</p>
         ${isSignup ? `<div class="field"><label>이름</label><input id="name" autocomplete="name" /></div>` : ''}
         <div class="field" style="margin-top:10px"><label>아이디</label><input id="login_id" autocomplete="username" /></div>
         <div class="field" style="margin-top:10px"><label>비밀번호</label><input id="password" type="password" autocomplete="${isSignup ? 'new-password' : 'current-password'}" /></div>
@@ -137,7 +165,7 @@ async function submitAuth(): Promise<void> {
       method: 'POST',
       body: JSON.stringify(body),
     })
-    if (data.user.role !== 'owner') {
+    if (data.user.role !== 'owner' && data.user.role !== 'manager') {
       window.location.replace('/')
       return
     }
@@ -194,14 +222,17 @@ function renderShell(): void {
   window.clearInterval(qrDrawTimer)
   window.clearInterval(qrTickTimer)
   window.clearInterval(liveTimer)
-  const nav: { id: View; label: string }[] = [
+  if (!allowedViews().includes(view)) view = 'emps'
+  const allNav: { id: View; label: string }[] = [
     { id: 'dashboard', label: '대시보드' },
     { id: 'company', label: '회사등록' },
     { id: 'depts', label: '지점관리' },
+    { id: 'managers', label: '점장관리' },
     { id: 'emps', label: '사원관리' },
     { id: 'raw', label: '원시데이터' },
     { id: 'qr', label: '출근 QR' },
   ]
+  const nav = allNav.filter((n) => allowedViews().includes(n.id))
   root.innerHTML = `
     <div class="admin-esl-theme">
       <aside class="admin-esl-sidebar">
@@ -215,7 +246,7 @@ function renderShell(): void {
             )
             .join('')}
           <div class="admin-esl-sidebar-foot">
-            <a class="admin-esl-menu-item" href="/tablet.html">태블릿 QR</a>
+            ${isOwner() ? '<a class="admin-esl-menu-item" href="/tablet.html">태블릿 QR</a>' : ''}
             <button class="admin-esl-menu-item" id="logout">로그아웃</button>
           </div>
         </nav>
@@ -224,9 +255,9 @@ function renderShell(): void {
         <header class="admin-esl-topbar">
           <div>
             <h2>${VIEW_TITLE[view]}</h2>
-            <p>${esc(user?.name || '')} · 관리자</p>
+            <p>${esc(user?.name || '')} · ${isManager() ? `점장${user?.department_name ? ` · ${user.department_name}` : ''}` : '관리자'}</p>
           </div>
-          <div class="admin-user">${esc(store?.name || '')}</div>
+          <div class="admin-user">${esc(isManager() ? user?.department_name || store?.name || '' : store?.name || '')}</div>
         </header>
         <div class="admin-esl-content" id="content"></div>
       </div>
@@ -249,6 +280,7 @@ async function fillView(): Promise<void> {
     if (view === 'dashboard') await fillDashboard(el)
     else if (view === 'company') fillCompany(el)
     else if (view === 'depts') await fillDepts(el)
+    else if (view === 'managers') await fillManagers(el)
     else if (view === 'emps') await fillEmps(el)
     else if (view === 'raw') await fillRaw(el)
     else await fillQr(el)
@@ -442,6 +474,136 @@ async function fillDepts(el: Element): Promise<void> {
   })
 }
 
+async function fillManagers(el: Element): Promise<void> {
+  const [mgrData, deptData] = await Promise.all([
+    api<{ items: Manager[] }>(`/api/managers?store_id=${store!.id}`),
+    api<{ items: Department[] }>(`/api/departments?store_id=${store!.id}`),
+  ])
+  const items = mgrData.items
+  const depts = deptData.items
+  const selected = items.find((d) => d.id === selectedMgrId) ?? null
+  const deptOptions = ['<option value="">지점 선택</option>']
+    .concat(
+      depts.map(
+        (d) =>
+          `<option value="${esc(d.name)}" ${selected?.department_name === d.name ? 'selected' : ''}>${esc(d.name)}</option>`,
+      ),
+    )
+    .join('')
+  el.innerHTML = `
+    <div class="split-table">
+      <section class="table-panel">
+        <div class="panel-hd"><h3>점장 ${items.length}명</h3></div>
+        ${
+          items.length
+            ? `<table class="data-table">
+            <thead><tr><th>아이디</th><th>이름</th><th>지점</th></tr></thead>
+            <tbody>
+              ${items
+                .map(
+                  (m) => `
+                <tr class="${selected?.id === m.id ? 'is-active' : ''}" data-id="${m.id}" style="cursor:pointer">
+                  <td>${esc(m.login_id)}</td>
+                  <td>${esc(m.name)}</td>
+                  <td>${esc(m.department_name)}</td>
+                </tr>`,
+                )
+                .join('')}
+            </tbody>
+          </table>`
+            : '<p class="empty">등록된 점장이 없습니다. 오른쪽에서 지점 점장을 등록하세요.</p>'
+        }
+      </section>
+      <aside class="register-panel">
+        <div class="panel-hd">
+          <div>
+            <h3>${selected ? '점장 수정' : '점장 등록'}</h3>
+            <p>점장은 해당 지점 사원만 등록할 수 있습니다.</p>
+          </div>
+        </div>
+        <form class="crud-form" id="mgr-form">
+          <div class="form-grid" style="grid-template-columns:1fr">
+            <div class="field"><label>지점</label><select id="mgr-dept">${deptOptions}</select></div>
+            <div class="field"><label>이름</label><input id="mgr-name" value="${esc(selected?.name || '')}" /></div>
+            <div class="field"><label>아이디</label><input id="mgr-login" value="${esc(selected?.login_id || '')}" autocomplete="off" /></div>
+            <div class="field"><label>비밀번호</label><input id="mgr-password" type="password" autocomplete="new-password" placeholder="${selected ? '변경 시에만 입력' : ''}" /></div>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="button" id="mgr-create">등록</button>
+            <button class="btn" type="button" id="mgr-update">수정</button>
+            <button class="btn btn-danger" type="button" id="mgr-delete">삭제</button>
+          </div>
+        </form>
+      </aside>
+    </div>
+  `
+  const reload = () => void fillManagers(el)
+  el.querySelector('#mgr-form')?.addEventListener('submit', (ev) => ev.preventDefault())
+  el.querySelectorAll<HTMLTableRowElement>('tr[data-id]').forEach((row) => {
+    row.addEventListener('click', () => {
+      selectedMgrId = Number(row.dataset.id)
+      reload()
+    })
+  })
+  el.querySelector('#mgr-create')?.addEventListener('click', () => {
+    const password = val('mgr-password')
+    if (!val('mgr-dept') || !val('mgr-name') || !val('mgr-login') || !password) {
+      window.alert('지점, 이름, 아이디, 비밀번호를 입력하세요.')
+      return
+    }
+    void api('/api/managers', {
+      method: 'POST',
+      body: JSON.stringify({
+        store_id: store!.id,
+        department_name: val('mgr-dept'),
+        name: val('mgr-name'),
+        login_id: val('mgr-login'),
+        password,
+      }),
+    })
+      .then(() => {
+        selectedMgrId = null
+        reload()
+      })
+      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
+  })
+  el.querySelector('#mgr-update')?.addEventListener('click', () => {
+    if (!selected) {
+      window.alert('수정할 점장을 테이블에서 선택하세요.')
+      return
+    }
+    if (!val('mgr-dept') || !val('mgr-name') || !val('mgr-login')) {
+      window.alert('지점, 이름, 아이디를 입력하세요.')
+      return
+    }
+    const password = val('mgr-password')
+    void api(`/api/managers/${selected.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        department_name: val('mgr-dept'),
+        name: val('mgr-name'),
+        login_id: val('mgr-login'),
+        password: password || null,
+      }),
+    })
+      .then(() => reload())
+      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
+  })
+  el.querySelector('#mgr-delete')?.addEventListener('click', () => {
+    if (!selected) {
+      window.alert('삭제할 점장을 테이블에서 선택하세요.')
+      return
+    }
+    if (!window.confirm('점장 계정을 삭제할까요?')) return
+    void api(`/api/managers/${selected.id}`, { method: 'DELETE' })
+      .then(() => {
+        selectedMgrId = null
+        reload()
+      })
+      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
+  })
+}
+
 async function fillEmps(el: Element): Promise<void> {
   const [empData, deptData] = await Promise.all([
     api<{ items: Employee[] }>(`/api/employees?store_id=${store!.id}`),
@@ -450,14 +612,17 @@ async function fillEmps(el: Element): Promise<void> {
   const items = empData.items
   const depts = deptData.items
   const selected = items.find((d) => d.id === selectedEmpId) ?? null
-  const deptOptions = ['<option value="">선택</option>']
-    .concat(
-      depts.map(
-        (d) =>
-          `<option value="${esc(d.name)}" ${selected?.department_name === d.name ? 'selected' : ''}>${esc(d.name)}</option>`,
-      ),
-    )
-    .join('')
+  const lockedDept = isManager() ? user?.department_name || '' : ''
+  const deptOptions = isManager()
+    ? `<option value="${esc(lockedDept)}" selected>${esc(lockedDept || '지점 미배정')}</option>`
+    : ['<option value="">선택</option>']
+        .concat(
+          depts.map(
+            (d) =>
+              `<option value="${esc(d.name)}" ${selected?.department_name === d.name ? 'selected' : ''}>${esc(d.name)}</option>`,
+          ),
+        )
+        .join('')
   el.innerHTML = `
     <div class="split-table">
       <section class="table-panel">
@@ -508,14 +673,20 @@ async function fillEmps(el: Element): Promise<void> {
         <div class="panel-hd">
           <div>
             <h3>${selected ? '사원 수정' : '사원 등록'}</h3>
-            <p>${selected ? '행을 눌러 선택한 사원을 수정합니다.' : '이름과 사번으로 알바 앱에 로그인합니다.'}</p>
+            <p>${
+              isManager()
+                ? `${esc(user?.department_name || '지점')} 사원만 등록됩니다.`
+                : selected
+                  ? '행을 눌러 선택한 사원을 수정합니다.'
+                  : '이름과 사번으로 알바 앱에 로그인합니다.'
+            }</p>
           </div>
         </div>
         <form class="crud-form" id="emp-form">
           <div class="form-grid" style="grid-template-columns:1fr">
             <div class="field"><label>사번</label><input id="emp-no" value="${esc(selected?.employee_no || '')}" /></div>
             <div class="field"><label>이름</label><input id="emp-name" value="${esc(selected?.name || '')}" /></div>
-            <div class="field"><label>지점</label><select id="emp-dept">${deptOptions}</select></div>
+            <div class="field"><label>지점</label><select id="emp-dept" ${isManager() ? 'disabled' : ''}>${deptOptions}</select></div>
             <div class="field"><label>입사일</label><input id="emp-hire" type="date" value="${esc(selected?.hire_date || todayStr())}" /></div>
             <div class="field"><label>상태</label>
               <select id="emp-status">
@@ -548,7 +719,7 @@ async function fillEmps(el: Element): Promise<void> {
       store_id: store!.id,
       employee_no: val('emp-no'),
       name: val('emp-name'),
-      department_name: val('emp-dept'),
+      department_name: isManager() ? user?.department_name || val('emp-dept') : val('emp-dept'),
       hire_date: val('emp-hire'),
       status: val('emp-status'),
       hourly_wage: Number(val('emp-wage') || 0),

@@ -8,20 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from backend.attendance_util import minutes_to_hours_label, pair_sessions
 from backend.database import Connection, get_db
-from backend.deps import get_current_user
+from backend.deps import get_current_user, manager_department_id, require_store_access
 from backend.kst import dt_iso, now_kst
 
 router = APIRouter(prefix="/owner", tags=["owner"])
 
 
 def _require_owner_store(conn: Connection, store_id: int, user: dict) -> None:
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT id FROM stores WHERE id = %s AND owner_id = %s LIMIT 1",
-        (store_id, user["id"]),
-    )
-    if not cur.fetchone():
-        raise HTTPException(status_code=403, detail="이 매장의 사장님만 볼 수 있습니다.")
+    require_store_access(conn, store_id, user)
 
 
 @router.get("/{store_id}/live")
@@ -33,17 +27,20 @@ def live(
     _require_owner_store(conn, store_id, user)
     today = now_kst().strftime("%Y-%m-%d")
     cur = conn.cursor()
-    cur.execute(
-        """
+    dept_id = manager_department_id(user)
+    sql = """
         SELECT e.id AS employee_id, e.employee_no, e.name, e.hourly_wage, e.status,
                d.name AS department_name
         FROM employees e
         LEFT JOIN departments d ON d.id = e.department_id
         WHERE e.store_id = %s AND e.status <> '퇴사'
-        ORDER BY e.name ASC
-        """,
-        (store_id,),
-    )
+    """
+    params: list[object] = [store_id]
+    if dept_id is not None:
+        sql += " AND e.department_id = %s"
+        params.append(dept_id)
+    sql += " ORDER BY e.name ASC"
+    cur.execute(sql, tuple(params))
     members = cur.fetchall() or []
     working = []
     off = []

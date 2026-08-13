@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.database import Connection, get_db
-from backend.deps import get_current_employee, get_current_user
+from backend.deps import get_current_employee, get_current_user, manager_scope
 from backend.jwt_tokens import create_access_token, create_refresh_token, decode_token
 from backend.kst import now_kst, now_kst_str
 from backend.passwords import hash_password, verify_password
@@ -55,16 +55,28 @@ def _token_pair(conn: Connection, user: dict) -> dict:
         (user["id"], jti, expires, now_kst_str()),
     )
     conn.commit()
+    payload = {
+        "id": user["id"],
+        "login_id": user["login_id"],
+        "name": user["name"],
+        "role": user["role"],
+    }
+    if str(user.get("role") or "") == "manager":
+        scope = manager_scope(conn, int(user["id"]))
+        if scope:
+            payload.update(
+                {
+                    "store_id": scope["store_id"],
+                    "department_id": scope["department_id"],
+                    "department_name": scope["department_name"],
+                    "store_name": scope["store_name"],
+                }
+            )
     return {
         "access_token": access,
         "refresh_token": refresh,
         "token_type": "bearer",
-        "user": {
-            "id": user["id"],
-            "login_id": user["login_id"],
-            "name": user["name"],
-            "role": user["role"],
-        },
+        "user": payload,
     }
 
 

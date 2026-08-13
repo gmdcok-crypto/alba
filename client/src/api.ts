@@ -1,4 +1,4 @@
-export type Role = 'owner' | 'worker'
+export type Role = 'owner' | 'manager' | 'worker'
 
 export type User = {
   id: number
@@ -10,6 +10,19 @@ export type User = {
   store_name?: string
   hourly_wage?: number
   auth_status?: string
+  department_id?: number
+  department_name?: string
+}
+
+export type Manager = {
+  id: number
+  store_id: number
+  department_id: number
+  user_id: number
+  login_id: string
+  name: string
+  department_name: string
+  department_code: string
 }
 
 export type Department = {

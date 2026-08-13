@@ -45,6 +45,11 @@ def get_current_user(
     row = cur.fetchone()
     if not row:
         raise HTTPException(status_code=401, detail="사용자를 찾을 수 없습니다.")
+    if str(row.get("role") or "") == "manager":
+        scope = manager_scope(conn, int(row["id"]))
+        if not scope:
+            raise HTTPException(status_code=401, detail="배정된 지점이 없습니다. 관리자에게 문의하세요.")
+        row.update(scope)
     return row
 
 
@@ -91,7 +96,55 @@ def get_current_employee(
     return row
 
 
+def manager_scope(conn: Connection, user_id: int) -> dict[str, Any] | None:
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT bm.store_id, bm.department_id, d.name AS department_name, s.name AS store_name
+        FROM branch_managers bm
+        JOIN departments d ON d.id = bm.department_id
+        JOIN stores s ON s.id = bm.store_id
+        WHERE bm.user_id = %s
+        LIMIT 1
+        """,
+        (user_id,),
+    )
+    return cur.fetchone()
+
+
 def require_owner(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     if user.get("role") != "owner":
         raise HTTPException(status_code=403, detail="사장님 계정만 사용할 수 있습니다.")
     return user
+
+
+def require_staff(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    if user.get("role") not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="관리자 계정만 사용할 수 있습니다.")
+    return user
+
+
+def require_store_access(conn: Connection, store_id: int, user: dict[str, Any]) -> None:
+    if user.get("role") == "owner":
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id FROM stores WHERE id = %s AND owner_id = %s LIMIT 1",
+            (store_id, user["id"]),
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=403, detail="이 매장의 사장님만 가능합니다.")
+        return
+    if user.get("role") == "manager":
+        if int(user.get("store_id") or 0) != int(store_id):
+            raise HTTPException(status_code=403, detail="이 지점의 점장만 가능합니다.")
+        return
+    raise HTTPException(status_code=403, detail="권한이 없습니다.")
+
+
+def manager_department_id(user: dict[str, Any]) -> int | None:
+    if user.get("role") != "manager":
+        return None
+    try:
+        return int(user.get("department_id") or 0) or None
+    except (TypeError, ValueError):
+        return None

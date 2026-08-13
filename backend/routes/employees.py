@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.database import Connection, IntegrityError, get_db
-from backend.deps import require_owner
+from backend.deps import manager_department_id, require_staff, require_store_access
 
 router = APIRouter(prefix="/employees", tags=["employees"])
 
@@ -33,14 +33,17 @@ class EmployeeUpdate(BaseModel):
     hourly_wage: Optional[int] = None
 
 
-def _require_store_owner(conn: Connection, store_id: int, user: dict) -> None:
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT id FROM stores WHERE id = %s AND owner_id = %s LIMIT 1",
-        (store_id, user["id"]),
-    )
-    if not cur.fetchone():
-        raise HTTPException(status_code=403, detail="이 매장의 사장님만 가능합니다.")
+def _assert_employee_scope(conn: Connection, emp: dict, user: dict) -> None:
+    require_store_access(conn, int(emp["store_id"]), user)
+    dept_id = manager_department_id(user)
+    if dept_id is not None and int(emp.get("department_id") or 0) != dept_id:
+        raise HTTPException(status_code=403, detail="다른 지점 사원은 관리할 수 없습니다.")
+
+
+def _department_name_for_write(conn: Connection, store_id: int, user: dict, department_name: str) -> str:
+    if user.get("role") == "manager":
+        return str(user.get("department_name") or "")
+    return department_name
 
 
 def _load_employee(conn: Connection, emp_id: int) -> dict:
@@ -95,22 +98,25 @@ def _revoke_tokens(conn: Connection, emp_id: int) -> None:
 @router.get("")
 def list_employees(
     store_id: int,
-    user: dict = Depends(require_owner),
+    user: dict = Depends(require_staff),
     conn: Connection = Depends(get_db),
 ) -> dict:
-    _require_store_owner(conn, store_id, user)
+    require_store_access(conn, store_id, user)
     cur = conn.cursor()
-    cur.execute(
-        """
+    dept_id = manager_department_id(user)
+    sql = """
         SELECT e.id, e.store_id, e.employee_no, e.name, e.department_id, e.hire_date,
                e.status, e.auth_status, e.hourly_wage, d.name AS department_name
         FROM employees e
         LEFT JOIN departments d ON d.id = e.department_id
         WHERE e.store_id = %s
-        ORDER BY e.employee_no ASC
-        """,
-        (store_id,),
-    )
+    """
+    params: list[object] = [store_id]
+    if dept_id is not None:
+        sql += " AND e.department_id = %s"
+        params.append(dept_id)
+    sql += " ORDER BY e.employee_no ASC"
+    cur.execute(sql, tuple(params))
     items = []
     for row in cur.fetchall() or []:
         hd = row.get("hire_date")
@@ -127,11 +133,12 @@ def list_employees(
 @router.post("", status_code=201)
 def create_employee(
     body: EmployeeCreate,
-    user: dict = Depends(require_owner),
+    user: dict = Depends(require_staff),
     conn: Connection = Depends(get_db),
 ) -> dict:
-    _require_store_owner(conn, body.store_id, user)
-    dept_id = _resolve_department_id(conn, body.store_id, body.department_name)
+    require_store_access(conn, body.store_id, user)
+    dept_name = _department_name_for_write(conn, body.store_id, user, body.department_name)
+    dept_id = _resolve_department_id(conn, body.store_id, dept_name)
     hd = _parse_hire_date(body.hire_date)
     status = body.status.strip() or "재직"
     try:
@@ -164,12 +171,13 @@ def create_employee(
 def update_employee(
     emp_id: int,
     body: EmployeeUpdate,
-    user: dict = Depends(require_owner),
+    user: dict = Depends(require_staff),
     conn: Connection = Depends(get_db),
 ) -> dict:
     row = _load_employee(conn, emp_id)
-    _require_store_owner(conn, int(row["store_id"]), user)
-    dept_id = _resolve_department_id(conn, int(row["store_id"]), body.department_name)
+    _assert_employee_scope(conn, row, user)
+    dept_name = _department_name_for_write(conn, int(row["store_id"]), user, body.department_name)
+    dept_id = _resolve_department_id(conn, int(row["store_id"]), dept_name)
     hd = _parse_hire_date(body.hire_date)
     status = body.status.strip() or "재직"
     wage = int(row.get("hourly_wage") or 0) if body.hourly_wage is None else max(0, int(body.hourly_wage))
@@ -199,11 +207,11 @@ def update_employee(
 @router.post("/{emp_id}/revoke-auth")
 def revoke_employee_auth(
     emp_id: int,
-    user: dict = Depends(require_owner),
+    user: dict = Depends(require_staff),
     conn: Connection = Depends(get_db),
 ) -> dict:
     row = _load_employee(conn, emp_id)
-    _require_store_owner(conn, int(row["store_id"]), user)
+    _assert_employee_scope(conn, row, user)
     cur = conn.cursor()
     cur.execute(
         "UPDATE employees SET password_hash=NULL, auth_status='X' WHERE id=%s",
@@ -217,11 +225,11 @@ def revoke_employee_auth(
 @router.delete("/{emp_id}")
 def delete_employee(
     emp_id: int,
-    user: dict = Depends(require_owner),
+    user: dict = Depends(require_staff),
     conn: Connection = Depends(get_db),
 ) -> dict:
     row = _load_employee(conn, emp_id)
-    _require_store_owner(conn, int(row["store_id"]), user)
+    _assert_employee_scope(conn, row, user)
     cur = conn.cursor()
     cur.execute("DELETE FROM employees WHERE id = %s", (emp_id,))
     conn.commit()

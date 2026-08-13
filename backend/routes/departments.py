@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.database import Connection, IntegrityError, get_db
-from backend.deps import require_owner
+from backend.deps import manager_department_id, require_owner, require_staff, require_store_access
 
 router = APIRouter(prefix="/departments", tags=["departments"])
 
@@ -49,15 +49,22 @@ def _next_dept_code(conn: Connection, store_id: int) -> str:
 @router.get("")
 def list_departments(
     store_id: int,
-    user: dict = Depends(require_owner),
+    user: dict = Depends(require_staff),
     conn: Connection = Depends(get_db),
 ) -> dict:
-    _require_store_owner(conn, store_id, user)
+    require_store_access(conn, store_id, user)
     cur = conn.cursor()
-    cur.execute(
-        "SELECT id, store_id, code, name FROM departments WHERE store_id = %s ORDER BY code",
-        (store_id,),
-    )
+    dept_id = manager_department_id(user)
+    if dept_id is not None:
+        cur.execute(
+            "SELECT id, store_id, code, name FROM departments WHERE store_id = %s AND id = %s ORDER BY code",
+            (store_id, dept_id),
+        )
+    else:
+        cur.execute(
+            "SELECT id, store_id, code, name FROM departments WHERE store_id = %s ORDER BY code",
+            (store_id,),
+        )
     return {"items": cur.fetchall() or []}
 
 

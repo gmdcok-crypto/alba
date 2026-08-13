@@ -108,6 +108,19 @@ _SQLITE_DDL = [
       FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS branch_managers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      store_id INTEGER NOT NULL,
+      department_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      UNIQUE (department_id),
+      UNIQUE (user_id),
+      FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE,
+      FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+    """,
 ]
 
 _MYSQL_DDL = [
@@ -221,6 +234,18 @@ _MYSQL_DDL = [
       PRIMARY KEY (id),
       UNIQUE KEY uk_emp_refresh_jti (jti),
       KEY idx_emp_refresh (employee_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS branch_managers (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      store_id BIGINT UNSIGNED NOT NULL,
+      department_id BIGINT UNSIGNED NOT NULL,
+      user_id BIGINT UNSIGNED NOT NULL,
+      PRIMARY KEY (id),
+      UNIQUE KEY uk_bm_dept (department_id),
+      UNIQUE KEY uk_bm_user (user_id),
+      KEY idx_bm_store (store_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
 ]

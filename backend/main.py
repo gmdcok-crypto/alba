@@ -20,7 +20,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 
 from backend.database import DictCursor, get_connection, on_railway, use_mysql
-from backend.routes import attendance_events, auth, clock, departments, employees, kiosk, owner, stores
+from backend.routes import attendance_events, auth, clock, departments, employees, kiosk, managers, owner, stores
 from backend.schema_ensure import ensure_schema
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
@@ -78,6 +78,7 @@ async def static_cache_control(request: Request, call_next):
 app.include_router(auth.router, prefix="/api")
 app.include_router(stores.router, prefix="/api")
 app.include_router(departments.router, prefix="/api")
+app.include_router(managers.router, prefix="/api")
 app.include_router(employees.router, prefix="/api")
 app.include_router(attendance_events.router, prefix="/api")
 app.include_router(clock.router, prefix="/api")
