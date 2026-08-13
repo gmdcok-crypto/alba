@@ -40,6 +40,7 @@ Railway UI: 웹 서비스 → Variables → **Add Variable Reference** → MySQL
 | 변수 | 값 |
 |------|-----|
 | `JWT_SECRET` | 강한 임의 문자열 (운영 필수) |
+| `KIOSK_QR_SECRET` | 출근 QR HMAC. 없으면 `JWT_SECRET` 사용 |
 
 변수 넣은 뒤 **Redeploy**.
 

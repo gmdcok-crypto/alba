@@ -1,7 +1,3 @@
-const ACCESS_KEY = 'alba_access'
-const REFRESH_KEY = 'alba_refresh'
-const USER_KEY = 'alba_user'
-
 export type Role = 'owner' | 'worker'
 
 export type User = {
@@ -23,6 +19,50 @@ export type Store = {
   status?: string
 }
 
+export type Today = {
+  store_name: string
+  clocked_in: boolean
+  last_in_at: string | null
+  last_out_at: string | null
+  minutes: number
+  hours_label: string
+  hourly_wage: number
+  pay_estimate: number
+}
+
+export type SessionRow = {
+  in_at: string | null
+  out_at: string | null
+  open: boolean
+  minutes: number
+  hours_label: string
+}
+
+export type Records = {
+  year: number
+  month: number
+  minutes: number
+  hours_label: string
+  hourly_wage: number
+  pay_estimate: number
+  sessions: SessionRow[]
+}
+
+export type Live = {
+  date: string
+  working: { user_id: number; name: string; last_at: string | null }[]
+  off: { user_id: number; name: string }[]
+}
+
+export type Member = {
+  user_id: number
+  name: string
+  login_id: string
+  role: Role
+  hourly_wage: number
+  status: string
+}
+
 function detailMessage(data: unknown, fallback: string): string {
   if (data && typeof data === 'object' && 'detail' in data) {
     const d = (data as { detail: unknown }).detail
@@ -34,63 +74,95 @@ function detailMessage(data: unknown, fallback: string): string {
   return fallback
 }
 
-export function getUser(): User | null {
-  try {
-    const raw = localStorage.getItem(USER_KEY)
-    return raw ? (JSON.parse(raw) as User) : null
-  } catch {
-    return null
+export function createSession(prefix: string) {
+  const ACCESS_KEY = `${prefix}_access`
+  const REFRESH_KEY = `${prefix}_refresh`
+  const USER_KEY = `${prefix}_user`
+  const STORE_KEY = `${prefix}_store_id`
+
+  function getUser(): User | null {
+    try {
+      const raw = localStorage.getItem(USER_KEY)
+      return raw ? (JSON.parse(raw) as User) : null
+    } catch {
+      return null
+    }
   }
+
+  function setSession(access: string, refresh: string, user: User): void {
+    localStorage.setItem(ACCESS_KEY, access)
+    localStorage.setItem(REFRESH_KEY, refresh)
+    localStorage.setItem(USER_KEY, JSON.stringify(user))
+  }
+
+  function clearSession(): void {
+    localStorage.removeItem(ACCESS_KEY)
+    localStorage.removeItem(REFRESH_KEY)
+    localStorage.removeItem(USER_KEY)
+  }
+
+  function getStoreId(): number | null {
+    const n = Number(localStorage.getItem(STORE_KEY) || 0)
+    return n || null
+  }
+
+  function setStoreId(id: number): void {
+    localStorage.setItem(STORE_KEY, String(id))
+  }
+
+  async function tryRefresh(): Promise<boolean> {
+    const refresh = localStorage.getItem(REFRESH_KEY)
+    if (!refresh) return false
+    const res = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refresh }),
+    })
+    if (!res.ok) return false
+    const data = (await res.json()) as {
+      access_token: string
+      refresh_token: string
+      user: User
+    }
+    setSession(data.access_token, data.refresh_token, data.user)
+    return true
+  }
+
+  async function api<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+    const headers = new Headers(init.headers)
+    if (init.body && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json')
+    }
+    const access = localStorage.getItem(ACCESS_KEY)
+    if (access) headers.set('Authorization', `Bearer ${access}`)
+    const res = await fetch(path, { ...init, headers })
+    if (res.status === 401 && retry) {
+      const ok = await tryRefresh()
+      if (ok) return api<T>(path, init, false)
+      clearSession()
+      throw new Error('로그인이 만료되었습니다.')
+    }
+    const text = await res.text()
+    const data = text ? JSON.parse(text) : null
+    if (!res.ok) {
+      throw new Error(detailMessage(data, `요청 실패 (${res.status})`))
+    }
+    return data as T
+  }
+
+  return { getUser, setSession, clearSession, getStoreId, setStoreId, api, STORE_KEY }
 }
 
-export function setSession(access: string, refresh: string, user: User): void {
-  localStorage.setItem(ACCESS_KEY, access)
-  localStorage.setItem(REFRESH_KEY, refresh)
-  localStorage.setItem(USER_KEY, JSON.stringify(user))
+export const workerSession = createSession('alba_worker')
+export const adminSession = createSession('alba_admin')
+
+export function money(n: number): string {
+  return `${n.toLocaleString('ko-KR')}원`
 }
 
-export function clearSession(): void {
-  localStorage.removeItem(ACCESS_KEY)
-  localStorage.removeItem(REFRESH_KEY)
-  localStorage.removeItem(USER_KEY)
+export function hhmm(value: string | null): string {
+  if (!value) return '-'
+  return value.slice(11, 16)
 }
 
-async function tryRefresh(): Promise<boolean> {
-  const refresh = localStorage.getItem(REFRESH_KEY)
-  if (!refresh) return false
-  const res = await fetch('/api/auth/refresh', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refresh_token: refresh }),
-  })
-  if (!res.ok) return false
-  const data = (await res.json()) as {
-    access_token: string
-    refresh_token: string
-    user: User
-  }
-  setSession(data.access_token, data.refresh_token, data.user)
-  return true
-}
-
-export async function api<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
-  const headers = new Headers(init.headers)
-  if (init.body && !headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json')
-  }
-  const access = localStorage.getItem(ACCESS_KEY)
-  if (access) headers.set('Authorization', `Bearer ${access}`)
-  const res = await fetch(path, { ...init, headers })
-  if (res.status === 401 && retry) {
-    const ok = await tryRefresh()
-    if (ok) return api<T>(path, init, false)
-    clearSession()
-    throw new Error('로그인이 만료되었습니다.')
-  }
-  const text = await res.text()
-  const data = text ? JSON.parse(text) : null
-  if (!res.ok) {
-    throw new Error(detailMessage(data, `요청 실패 (${res.status})`))
-  }
-  return data as T
-}
+export const WEEK = ['일', '월', '화', '수', '목', '금', '토']

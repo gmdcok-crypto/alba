@@ -1,0 +1,179 @@
+/* 태블릿 · 출근 인증 QR (키오스크형) — d:\attend 와 동일 톤 */
+
+:root {
+  --t-bg: #0b0f17;
+  --t-surface: #121826;
+  --t-border: #273449;
+  --t-text: #f1f5f9;
+  --t-muted: #94a3b8;
+  --t-accent: #2dd4bf;
+  --t-radius: 16px;
+  color-scheme: dark;
+  font-family: 'Noto Sans KR', system-ui, -apple-system, sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background:
+    radial-gradient(900px 500px at 50% -20%, rgba(45, 212, 191, 0.12), transparent),
+    radial-gradient(600px 400px at 100% 100%, rgba(99, 102, 241, 0.08), transparent), var(--t-bg);
+  color: var(--t-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+#tablet-root {
+  min-height: 100dvh;
+  padding: max(20px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+}
+
+.tablet-layout {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+}
+
+.tablet-header {
+  text-align: center;
+  width: 100%;
+}
+
+.tablet-header h1 {
+  margin: 0;
+  font-size: clamp(1.35rem, 3.5vw, 1.75rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.tablet-store {
+  margin: 8px 0 0;
+  color: var(--t-accent);
+  font-weight: 600;
+}
+
+.tablet-qr-card {
+  width: 100%;
+  max-width: min(520px, 92vw);
+  background: var(--t-surface);
+  border: 1px solid var(--t-border);
+  border-radius: var(--t-radius);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  padding: clamp(20px, 4vw, 32px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.tablet-qr-frame {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  line-height: 0;
+}
+
+.tablet-qr-frame canvas {
+  display: block;
+  width: 100%;
+  max-width: min(400px, 78vmin);
+  height: auto !important;
+}
+
+.tablet-meta {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 24px;
+}
+
+.tablet-meta dt {
+  margin: 0 0 6px;
+  font-size: clamp(0.9375rem, 2.2vw, 1.125rem);
+  font-weight: 600;
+  color: var(--t-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tablet-meta dd {
+  margin: 0;
+  font-size: clamp(1.25rem, 3.2vw, 1.625rem);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+
+.tablet-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35em;
+}
+
+.tablet-clock__line2 {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+#tablet-countdown.tablet-countdown--error {
+  color: #f87171;
+}
+
+.tablet-login {
+  max-width: 400px;
+  margin: 12vh auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+}
+
+.tablet-login h1 {
+  margin: 0;
+}
+
+.tablet-login input,
+.tablet-login button {
+  font: inherit;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--t-border);
+}
+
+.tablet-login input {
+  background: var(--t-surface);
+  color: var(--t-text);
+}
+
+.tablet-login button {
+  background: var(--t-accent);
+  color: #042f2e;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+}
+
+.tablet-login a {
+  color: var(--t-accent);
+}
+
+.tablet-err {
+  color: #f87171;
+  margin: 0;
+}
+
+@media (max-width: 520px) {
+  .tablet-meta {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "알바근태 관리자",
+  "short_name": "알바관리",
+  "start_url": "/admin.html",
+  "display": "standalone",
+  "background_color": "#f0f4f8",
+  "theme_color": "#0d9488",
+  "lang": "ko"
+}

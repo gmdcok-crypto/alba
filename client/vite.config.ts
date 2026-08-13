@@ -18,4 +18,13 @@ export default defineConfig({
     port: 4173,
     proxy: { ...apiProxy },
   },
+  build: {
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        admin: 'admin.html',
+        tablet: 'tablet.html',
+      },
+    },
+  },
 })

@@ -1,26 +1,26 @@
-"""모바일 출퇴근."""
+"""모바일 출퇴근 (QR)."""
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from backend.attendance_util import haversine_m, minutes_to_hours_label, pair_sessions
+from backend.attendance_util import minutes_to_hours_label, pair_sessions
 from backend.database import Connection, get_db
 from backend.deps import get_current_user
+from backend.kiosk_qr import verify_kiosk_qr_payload
 from backend.kst import dt_iso, now_kst, now_kst_str, parse_dt
 
 router = APIRouter(prefix="/clock", tags=["clock"])
 
 
-class ClockBody(BaseModel):
-    store_id: int
+class ClockQrBody(BaseModel):
+    qr: str = Field(..., min_length=1, description="스캔한 QR 문자열(JSON)")
     intent: Literal["in", "out"]
-    lat: Optional[float] = None
-    lng: Optional[float] = None
 
 
 def _member(conn: Connection, store_id: int, user_id: int) -> dict:
@@ -116,16 +116,26 @@ def clock_today(
     }
 
 
-@router.post("")
-def clock(
-    body: ClockBody,
+@router.post("/qr")
+def clock_with_qr(
+    body: ClockQrBody,
     request: Request,
     user: dict = Depends(get_current_user),
     conn: Connection = Depends(get_db),
 ) -> dict:
-    member = _member(conn, body.store_id, int(user["id"]))
+    if user.get("role") != "worker":
+        raise HTTPException(status_code=403, detail="알바 계정만 출퇴근할 수 있습니다.")
+    try:
+        data = json.loads(body.qr.strip())
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail="QR 내용을 JSON으로 읽을 수 없습니다.") from e
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="QR 데이터 형식이 올바르지 않습니다.")
+
+    store_id = verify_kiosk_qr_payload(data)
+    _member(conn, store_id, int(user["id"]))
     event_type = "IN" if body.intent == "in" else "OUT"
-    events = _today_events(conn, body.store_id, int(user["id"]))
+    events = _today_events(conn, store_id, int(user["id"]))
     last = events[-1] if events else None
     last_type = last["event_type"] if last else None
 
@@ -136,21 +146,8 @@ def clock(
 
     if last:
         last_at = parse_dt(last["occurred_at"])
-        if last_at and (now_kst() - last_at).total_seconds() < 30:
+        if last_at and (now_kst() - last_at).total_seconds() < 45:
             raise HTTPException(status_code=429, detail="잠시 후 다시 시도하세요.")
-
-    fence = int(member.get("geofence_m") or 0)
-    store_lat = member.get("lat")
-    store_lng = member.get("lng")
-    if fence > 0 and store_lat is not None and store_lng is not None:
-        if body.lat is None or body.lng is None:
-            raise HTTPException(status_code=400, detail="매장 위치 확인을 위해 위치 권한이 필요합니다.")
-        dist = haversine_m(float(store_lat), float(store_lng), float(body.lat), float(body.lng))
-        if dist > fence:
-            raise HTTPException(
-                status_code=403,
-                detail=f"매장에서 {int(dist)}m 떨어져 있습니다. {fence}m 이내에서만 출퇴근할 수 있습니다.",
-            )
 
     ua = (request.headers.get("user-agent") or "")[:250]
     now = now_kst_str()
@@ -159,12 +156,17 @@ def clock(
         """
         INSERT INTO attendance_events
           (store_id, user_id, event_type, occurred_at, lat, lng, source, device_info, created_at)
-        VALUES (%s, %s, %s, %s, %s, %s, 'MOBILE', %s, %s)
+        VALUES (%s, %s, %s, %s, NULL, NULL, 'QR', %s, %s)
         """,
-        (body.store_id, user["id"], event_type, now, body.lat, body.lng, ua or None, now),
+        (store_id, user["id"], event_type, now, ua or None, now),
     )
     conn.commit()
-    return {"ok": True, "event_type": event_type, "occurred_at": now}
+    return {
+        "ok": True,
+        "event_type": event_type,
+        "occurred_at": now,
+        "store_id": store_id,
+    }
 
 
 @router.get("/records")

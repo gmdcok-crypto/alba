@@ -20,7 +20,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 
 from backend.database import DictCursor, get_connection, on_railway, use_mysql
-from backend.routes import auth, clock, owner, stores
+from backend.routes import auth, clock, kiosk, owner, stores
 from backend.schema_ensure import ensure_schema
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
@@ -78,6 +78,7 @@ async def static_cache_control(request: Request, call_next):
 app.include_router(auth.router, prefix="/api")
 app.include_router(stores.router, prefix="/api")
 app.include_router(clock.router, prefix="/api")
+app.include_router(kiosk.router, prefix="/api")
 app.include_router(owner.router, prefix="/api")
 
 
@@ -133,14 +134,29 @@ _STATIC_DIST = Path(__file__).resolve().parent.parent / "client" / "dist"
 _INDEX = _STATIC_DIST / "index.html"
 
 
-@app.get("/", response_model=None)
-def spa_index() -> Union[FileResponse, JSONResponse]:
-    if not _INDEX.exists():
+def _html(name: str) -> Union[FileResponse, JSONResponse]:
+    path = _STATIC_DIST / name
+    if not path.exists():
         return JSONResponse(
             {"detail": "client/dist 가 없습니다. Railway 빌드에서 Vite 가 실행됐는지 확인하세요."},
             status_code=503,
         )
-    return FileResponse(_INDEX)
+    return FileResponse(path)
+
+
+@app.get("/", response_model=None)
+def spa_index() -> Union[FileResponse, JSONResponse]:
+    return _html("index.html")
+
+
+@app.get("/admin.html", response_model=None)
+def admin_pwa() -> Union[FileResponse, JSONResponse]:
+    return _html("admin.html")
+
+
+@app.get("/tablet.html", response_model=None)
+def tablet_kiosk() -> Union[FileResponse, JSONResponse]:
+    return _html("tablet.html")
 
 
 if _STATIC_DIST.exists():
