@@ -348,7 +348,7 @@ async function fillDepts(el: Element): Promise<void> {
         ${
           items.length
             ? `<table class="data-table">
-            <thead><tr><th>지점코드</th><th>지점명</th><th></th></tr></thead>
+            <thead><tr><th>지점코드</th><th>지점명</th></tr></thead>
             <tbody>
               ${items
                 .map(
@@ -356,11 +356,6 @@ async function fillDepts(el: Element): Promise<void> {
                 <tr class="${selected?.id === d.id ? 'is-active' : ''}" data-id="${d.id}" style="cursor:pointer">
                   <td>${esc(d.code)}</td>
                   <td>${esc(d.name)}</td>
-                  <td>
-                    <div class="row-actions">
-                      <button type="button" class="btn btn-danger" data-del="${d.id}">삭제</button>
-                    </div>
-                  </td>
                 </tr>`,
                 )
                 .join('')}
@@ -393,8 +388,7 @@ async function fillDepts(el: Element): Promise<void> {
   const reload = () => void fillDepts(el)
   el.querySelector('#dept-form')?.addEventListener('submit', (ev) => ev.preventDefault())
   el.querySelectorAll<HTMLTableRowElement>('tr[data-id]').forEach((row) => {
-    row.addEventListener('click', (ev) => {
-      if ((ev.target as HTMLElement).closest('button')) return
+    row.addEventListener('click', () => {
       selectedDeptId = Number(row.dataset.id)
       reload()
     })
@@ -433,27 +427,18 @@ async function fillDepts(el: Element): Promise<void> {
       .then(() => reload())
       .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
   })
-  function deleteDept(id: number): void {
-    if (!window.confirm('지점을 삭제할까요?')) return
-    void api(`/api/departments/${id}`, { method: 'DELETE' })
-      .then(() => {
-        if (selectedDeptId === id) selectedDeptId = null
-        reload()
-      })
-      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
-  }
   el.querySelector('#dept-delete')?.addEventListener('click', () => {
     if (!selected) {
       window.alert('삭제할 지점을 테이블에서 선택하세요.')
       return
     }
-    deleteDept(selected.id)
-  })
-  el.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((btn) => {
-    btn.addEventListener('click', (ev) => {
-      ev.stopPropagation()
-      deleteDept(Number(btn.dataset.del))
-    })
+    if (!window.confirm('지점을 삭제할까요?')) return
+    void api(`/api/departments/${selected.id}`, { method: 'DELETE' })
+      .then(() => {
+        selectedDeptId = null
+        reload()
+      })
+      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
   })
 }
 
@@ -509,7 +494,6 @@ async function fillEmps(el: Element): Promise<void> {
                   <td>
                     <div class="row-actions">
                       <button type="button" class="btn" data-revoke="${e.id}">인증취소</button>
-                      <button type="button" class="btn btn-danger" data-del="${e.id}">삭제</button>
                     </div>
                   </td>
                 </tr>`,
@@ -620,19 +604,6 @@ async function fillEmps(el: Element): Promise<void> {
         .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
     })
   })
-  el.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((btn) => {
-    btn.addEventListener('click', (ev) => {
-      ev.stopPropagation()
-      const id = Number(btn.dataset.del)
-      if (!window.confirm('사원을 삭제할까요?')) return
-      void api(`/api/employees/${id}`, { method: 'DELETE' })
-        .then(() => {
-          if (selectedEmpId === id) selectedEmpId = null
-          return fillEmps(el)
-        })
-        .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
-    })
-  })
 }
 
 function sourceLabel(source: string | null): string {
@@ -693,7 +664,6 @@ async function fillRaw(el: Element): Promise<void> {
                 <th>이름</th>
                 <th>구분</th>
                 <th>출처</th>
-                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -706,11 +676,6 @@ async function fillRaw(el: Element): Promise<void> {
                   <td>${esc(e.employee_name)}</td>
                   <td>${esc(e.event_label)}</td>
                   <td>${esc(sourceLabel(e.source))}</td>
-                  <td>
-                    <div class="row-actions">
-                      <button type="button" class="btn btn-danger" data-del="${e.id}">삭제</button>
-                    </div>
-                  </td>
                 </tr>`,
                 )
                 .join('')}
@@ -755,8 +720,7 @@ async function fillRaw(el: Element): Promise<void> {
     reload()
   })
   el.querySelectorAll<HTMLTableRowElement>('tr[data-ev]').forEach((row) => {
-    row.addEventListener('click', (ev) => {
-      if ((ev.target as HTMLElement).closest('button')) return
+    row.addEventListener('click', () => {
       selectedEventId = Number(row.dataset.ev)
       reload()
     })
@@ -824,19 +788,6 @@ async function fillRaw(el: Element): Promise<void> {
         reload()
       })
       .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
-  })
-  el.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((btn) => {
-    btn.addEventListener('click', (ev) => {
-      ev.stopPropagation()
-      const id = Number(btn.dataset.del)
-      if (!window.confirm('이 기록을 삭제할까요?')) return
-      void api(`/api/attendance-events/${id}?store_id=${store!.id}`, { method: 'DELETE' })
-        .then(() => {
-          if (selectedEventId === id) selectedEventId = null
-          reload()
-        })
-        .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
-    })
   })
 }
 
