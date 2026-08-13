@@ -1,4 +1,4 @@
-"""부서관리."""
+"""지점관리."""
 
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ def create_department(
         new_id = cur.lastrowid
     except IntegrityError as e:
         conn.rollback()
-        raise HTTPException(status_code=409, detail="이미 사용 중인 부서코드입니다.") from e
+        raise HTTPException(status_code=409, detail="이미 사용 중인 지점코드입니다.") from e
     return {"id": int(new_id), "code": code, "name": name}
 
 
@@ -95,7 +95,7 @@ def update_department(
     cur.execute("SELECT id, store_id FROM departments WHERE id = %s LIMIT 1", (dept_id,))
     row = cur.fetchone()
     if not row:
-        raise HTTPException(status_code=404, detail="부서를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="지점을 찾을 수 없습니다.")
     _require_store_owner(conn, int(row["store_id"]), user)
     try:
         cur.execute(
@@ -105,7 +105,7 @@ def update_department(
         conn.commit()
     except IntegrityError as e:
         conn.rollback()
-        raise HTTPException(status_code=409, detail="이미 사용 중인 부서코드입니다.") from e
+        raise HTTPException(status_code=409, detail="이미 사용 중인 지점코드입니다.") from e
     return {"ok": True}
 
 
@@ -119,7 +119,7 @@ def delete_department(
     cur.execute("SELECT id, store_id FROM departments WHERE id = %s LIMIT 1", (dept_id,))
     row = cur.fetchone()
     if not row:
-        raise HTTPException(status_code=404, detail="부서를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="지점을 찾을 수 없습니다.")
     _require_store_owner(conn, int(row["store_id"]), user)
     cur.execute("DELETE FROM departments WHERE id = %s", (dept_id,))
     conn.commit()

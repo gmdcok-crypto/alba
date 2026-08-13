@@ -20,7 +20,7 @@ type View = 'dashboard' | 'company' | 'depts' | 'emps' | 'raw' | 'qr'
 const VIEW_TITLE: Record<View, string> = {
   dashboard: '대시보드',
   company: '회사등록',
-  depts: '부서관리',
+  depts: '지점관리',
   emps: '사원관리',
   raw: '원시데이터',
   qr: '출근 QR',
@@ -197,7 +197,7 @@ function renderShell(): void {
   const nav: { id: View; label: string }[] = [
     { id: 'dashboard', label: '대시보드' },
     { id: 'company', label: '회사등록' },
-    { id: 'depts', label: '부서관리' },
+    { id: 'depts', label: '지점관리' },
     { id: 'emps', label: '사원관리' },
     { id: 'raw', label: '원시데이터' },
     { id: 'qr', label: '출근 QR' },
@@ -275,7 +275,7 @@ async function fillDashboard(el: Element): Promise<void> {
           <div class="panel-hd"><h3>실시간 출근</h3></div>
           ${
             data.working.length
-              ? `<table class="data-table"><thead><tr><th>사번</th><th>이름</th><th>부서</th><th>출근</th></tr></thead><tbody>
+              ? `<table class="data-table"><thead><tr><th>사번</th><th>이름</th><th>지점</th><th>출근</th></tr></thead><tbody>
               ${data.working
                 .map(
                   (p) =>
@@ -290,7 +290,7 @@ async function fillDashboard(el: Element): Promise<void> {
           <div class="panel-hd"><h3>미출근</h3></div>
           ${
             data.off.length
-              ? `<table class="data-table"><thead><tr><th>사번</th><th>이름</th><th>부서</th></tr></thead><tbody>
+              ? `<table class="data-table"><thead><tr><th>사번</th><th>이름</th><th>지점</th></tr></thead><tbody>
               ${data.off
                 .map(
                   (p) =>
@@ -342,62 +342,118 @@ async function fillDepts(el: Element): Promise<void> {
   const items = data.items
   const selected = items.find((d) => d.id === selectedDeptId) ?? null
   el.innerHTML = `
-    <div class="split">
-      <div class="crud-list">
-        <button class="list-item ${selected ? '' : 'is-active'}" id="dept-new"><div class="t">+ 새 부서</div></button>
-        ${items
-          .map(
-            (d) => `
-          <button class="list-item ${selected?.id === d.id ? 'is-active' : ''}" data-id="${d.id}">
-            <div class="t">${esc(d.name)}</div>
-            <div class="s">${esc(d.code)}</div>
-          </button>`,
-          )
-          .join('')}
-      </div>
-      <form class="crud-form" id="dept-form">
-        <div class="form-grid">
-          <div class="field"><label>부서코드</label><input id="dept-code" value="${esc(selected?.code || '')}" placeholder="비우면 자동" /></div>
-          <div class="field"><label>부서명</label><input id="dept-name" value="${esc(selected?.name || '')}" /></div>
+    <div class="split-table">
+      <section class="table-panel">
+        <div class="panel-hd"><h3>지점 ${items.length}곳</h3></div>
+        ${
+          items.length
+            ? `<table class="data-table">
+            <thead><tr><th>지점코드</th><th>지점명</th><th></th></tr></thead>
+            <tbody>
+              ${items
+                .map(
+                  (d) => `
+                <tr class="${selected?.id === d.id ? 'is-active' : ''}" data-id="${d.id}" style="cursor:pointer">
+                  <td>${esc(d.code)}</td>
+                  <td>${esc(d.name)}</td>
+                  <td>
+                    <div class="row-actions">
+                      <button type="button" class="btn btn-danger" data-del="${d.id}">삭제</button>
+                    </div>
+                  </td>
+                </tr>`,
+                )
+                .join('')}
+            </tbody>
+          </table>`
+            : '<p class="empty">등록된 지점이 없습니다. 오른쪽에서 지점을 등록하세요.</p>'
+        }
+      </section>
+      <aside class="register-panel">
+        <div class="panel-hd">
+          <div>
+            <h3>${selected ? '지점 수정' : '지점 등록'}</h3>
+            <p>${selected ? '행을 눌러 선택한 지점을 수정·삭제합니다.' : '새 지점을 등록합니다.'}</p>
+          </div>
         </div>
-        <div class="form-actions">
-          <button class="btn btn-primary" type="submit">저장</button>
-          ${selected ? `<button class="btn btn-danger" type="button" id="dept-del">삭제</button>` : ''}
-        </div>
-      </form>
+        <form class="crud-form" id="dept-form">
+          <div class="form-grid" style="grid-template-columns:1fr">
+            <div class="field"><label>지점코드</label><input id="dept-code" value="${esc(selected?.code || '')}" placeholder="비우면 자동" /></div>
+            <div class="field"><label>지점명</label><input id="dept-name" value="${esc(selected?.name || '')}" /></div>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="button" id="dept-create">등록</button>
+            <button class="btn" type="button" id="dept-update">수정</button>
+            <button class="btn btn-danger" type="button" id="dept-delete">삭제</button>
+          </div>
+        </form>
+      </aside>
     </div>
   `
-  document.querySelector('#dept-new')?.addEventListener('click', () => {
-    selectedDeptId = null
-    void fillDepts(el)
-  })
-  el.querySelectorAll<HTMLButtonElement>('[data-id]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      selectedDeptId = Number(btn.dataset.id)
-      void fillDepts(el)
+  const reload = () => void fillDepts(el)
+  el.querySelector('#dept-form')?.addEventListener('submit', (ev) => ev.preventDefault())
+  el.querySelectorAll<HTMLTableRowElement>('tr[data-id]').forEach((row) => {
+    row.addEventListener('click', (ev) => {
+      if ((ev.target as HTMLElement).closest('button')) return
+      selectedDeptId = Number(row.dataset.id)
+      reload()
     })
   })
-  document.querySelector('#dept-form')?.addEventListener('submit', (ev) => {
-    ev.preventDefault()
-    const payload = { store_id: store!.id, code: val('dept-code') || undefined, name: val('dept-name') }
-    const req = selected
-      ? api(`/api/departments/${selected.id}`, {
-          method: 'PUT',
-          body: JSON.stringify({ code: val('dept-code'), name: val('dept-name') }),
-        })
-      : api('/api/departments', { method: 'POST', body: JSON.stringify(payload) })
-    void req
-      .then(() => fillDepts(el))
-      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
-  })
-  document.querySelector('#dept-del')?.addEventListener('click', () => {
-    if (!selected || !window.confirm('부서를 삭제할까요?')) return
-    void api(`/api/departments/${selected.id}`, { method: 'DELETE' })
+  el.querySelector('#dept-create')?.addEventListener('click', () => {
+    const name = val('dept-name')
+    if (!name) {
+      window.alert('지점명을 입력하세요.')
+      return
+    }
+    void api('/api/departments', {
+      method: 'POST',
+      body: JSON.stringify({ store_id: store!.id, code: val('dept-code') || undefined, name }),
+    })
       .then(() => {
         selectedDeptId = null
-        return fillDepts(el)
+        reload()
       })
       .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
+  })
+  el.querySelector('#dept-update')?.addEventListener('click', () => {
+    if (!selected) {
+      window.alert('수정할 지점을 테이블에서 선택하세요.')
+      return
+    }
+    const name = val('dept-name')
+    const code = val('dept-code')
+    if (!name || !code) {
+      window.alert('지점코드와 지점명을 입력하세요.')
+      return
+    }
+    void api(`/api/departments/${selected.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ code, name }),
+    })
+      .then(() => reload())
+      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
+  })
+  function deleteDept(id: number): void {
+    if (!window.confirm('지점을 삭제할까요?')) return
+    void api(`/api/departments/${id}`, { method: 'DELETE' })
+      .then(() => {
+        if (selectedDeptId === id) selectedDeptId = null
+        reload()
+      })
+      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
+  }
+  el.querySelector('#dept-delete')?.addEventListener('click', () => {
+    if (!selected) {
+      window.alert('삭제할 지점을 테이블에서 선택하세요.')
+      return
+    }
+    deleteDept(selected.id)
+  })
+  el.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      deleteDept(Number(btn.dataset.del))
+    })
   })
 }
 
@@ -430,7 +486,7 @@ async function fillEmps(el: Element): Promise<void> {
               <tr>
                 <th>사번</th>
                 <th>이름</th>
-                <th>부서</th>
+                <th>지점</th>
                 <th>입사일</th>
                 <th>상태</th>
                 <th>인증</th>
@@ -475,7 +531,7 @@ async function fillEmps(el: Element): Promise<void> {
           <div class="form-grid" style="grid-template-columns:1fr">
             <div class="field"><label>사번</label><input id="emp-no" value="${esc(selected?.employee_no || '')}" /></div>
             <div class="field"><label>이름</label><input id="emp-name" value="${esc(selected?.name || '')}" /></div>
-            <div class="field"><label>부서</label><select id="emp-dept">${deptOptions}</select></div>
+            <div class="field"><label>지점</label><select id="emp-dept">${deptOptions}</select></div>
             <div class="field"><label>입사일</label><input id="emp-hire" type="date" value="${esc(selected?.hire_date || todayStr())}" /></div>
             <div class="field"><label>상태</label>
               <select id="emp-status">
@@ -486,27 +542,25 @@ async function fillEmps(el: Element): Promise<void> {
             <div class="field"><label>시급</label><input id="emp-wage" type="number" min="0" value="${selected?.hourly_wage ?? 0}" /></div>
           </div>
           <div class="form-actions">
-            <button class="btn btn-primary" type="submit">${selected ? '수정 저장' : '등록'}</button>
-            ${selected ? `<button class="btn" type="button" id="emp-new">새 등록</button>` : ''}
+            <button class="btn btn-primary" type="button" id="emp-create">등록</button>
+            <button class="btn" type="button" id="emp-update">수정</button>
+            <button class="btn btn-danger" type="button" id="emp-delete">삭제</button>
           </div>
         </form>
       </aside>
     </div>
   `
-  document.querySelector('#emp-new')?.addEventListener('click', () => {
-    selectedEmpId = null
-    void fillEmps(el)
-  })
+  const reloadEmps = () => void fillEmps(el)
+  el.querySelector('#emp-form')?.addEventListener('submit', (ev) => ev.preventDefault())
   el.querySelectorAll<HTMLTableRowElement>('tr[data-id]').forEach((row) => {
     row.addEventListener('click', (ev) => {
       if ((ev.target as HTMLElement).closest('button')) return
       selectedEmpId = Number(row.dataset.id)
-      void fillEmps(el)
+      reloadEmps()
     })
   })
-  document.querySelector('#emp-form')?.addEventListener('submit', (ev) => {
-    ev.preventDefault()
-    const payload = {
+  function empPayload() {
+    return {
       store_id: store!.id,
       employee_no: val('emp-no'),
       name: val('emp-name'),
@@ -515,13 +569,44 @@ async function fillEmps(el: Element): Promise<void> {
       status: val('emp-status'),
       hourly_wage: Number(val('emp-wage') || 0),
     }
-    const req = selected
-      ? api(`/api/employees/${selected.id}`, { method: 'PUT', body: JSON.stringify(payload) })
-      : api('/api/employees', { method: 'POST', body: JSON.stringify(payload) })
-    void req
+  }
+  el.querySelector('#emp-create')?.addEventListener('click', () => {
+    const body = empPayload()
+    if (!body.employee_no || !body.name) {
+      window.alert('사번과 이름을 입력하세요.')
+      return
+    }
+    void api('/api/employees', { method: 'POST', body: JSON.stringify(body) })
       .then(() => {
         selectedEmpId = null
-        return fillEmps(el)
+        reloadEmps()
+      })
+      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
+  })
+  el.querySelector('#emp-update')?.addEventListener('click', () => {
+    if (!selected) {
+      window.alert('수정할 사원을 테이블에서 선택하세요.')
+      return
+    }
+    const body = empPayload()
+    if (!body.employee_no || !body.name) {
+      window.alert('사번과 이름을 입력하세요.')
+      return
+    }
+    void api(`/api/employees/${selected.id}`, { method: 'PUT', body: JSON.stringify(body) })
+      .then(() => reloadEmps())
+      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
+  })
+  el.querySelector('#emp-delete')?.addEventListener('click', () => {
+    if (!selected) {
+      window.alert('삭제할 사원을 테이블에서 선택하세요.')
+      return
+    }
+    if (!window.confirm('사원을 삭제할까요?')) return
+    void api(`/api/employees/${selected.id}`, { method: 'DELETE' })
+      .then(() => {
+        selectedEmpId = null
+        reloadEmps()
       })
       .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
   })
@@ -654,8 +739,9 @@ async function fillRaw(el: Element): Promise<void> {
             <div class="field"><label>시각</label><input id="raw-time" type="time" step="1" value="${esc((occurred.slice(11, 19) || '09:00:00').slice(0, 8))}" /></div>
           </div>
           <div class="form-actions">
-            <button class="btn btn-primary" type="submit">${selectedEv ? '수정 저장' : '등록'}</button>
-            ${selectedEv ? `<button class="btn" type="button" id="raw-clear">새 등록</button>` : ''}
+            <button class="btn btn-primary" type="button" id="raw-create">등록</button>
+            <button class="btn" type="button" id="raw-update">수정</button>
+            <button class="btn btn-danger" type="button" id="raw-delete">삭제</button>
           </div>
         </form>
       </aside>
@@ -675,28 +761,69 @@ async function fillRaw(el: Element): Promise<void> {
       reload()
     })
   })
-  document.querySelector('#raw-form')?.addEventListener('submit', (ev) => {
-    ev.preventDefault()
-    const payload = {
+  function padTime(t: string): string {
+    if (/^\d{2}:\d{2}$/.test(t)) return `${t}:00`
+    return t
+  }
+  function rawPayload() {
+    const time = padTime(val('raw-time'))
+    return {
       store_id: store!.id,
       employee_no: val('raw-no'),
       event_type: val('raw-type'),
       event_date: val('raw-date'),
-      event_time: val('raw-time'),
+      event_time: time,
     }
-    const req = selectedEv
-      ? api(`/api/attendance-events/${selectedEv.id}`, { method: 'PUT', body: JSON.stringify(payload) })
-      : api('/api/attendance-events', { method: 'POST', body: JSON.stringify(payload) })
-    void req
+  }
+  function requireRawForm(): ReturnType<typeof rawPayload> | null {
+    const body = rawPayload()
+    if (!body.employee_no) {
+      window.alert('사원을 선택하세요.')
+      return null
+    }
+    if (!body.event_date || !body.event_time) {
+      window.alert('날짜와 시각을 입력하세요.')
+      return null
+    }
+    return body
+  }
+  el.querySelector('#raw-form')?.addEventListener('submit', (ev) => ev.preventDefault())
+  el.querySelector('#raw-create')?.addEventListener('click', () => {
+    const body = requireRawForm()
+    if (!body) return
+    void api('/api/attendance-events', { method: 'POST', body: JSON.stringify(body) })
       .then(() => {
         selectedEventId = null
         reload()
       })
       .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
   })
-  document.querySelector('#raw-clear')?.addEventListener('click', () => {
-    selectedEventId = null
-    reload()
+  el.querySelector('#raw-update')?.addEventListener('click', () => {
+    if (!selectedEv) {
+      window.alert('수정할 기록을 테이블에서 선택하세요.')
+      return
+    }
+    const body = requireRawForm()
+    if (!body) return
+    void api(`/api/attendance-events/${selectedEv.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    })
+      .then(() => reload())
+      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
+  })
+  el.querySelector('#raw-delete')?.addEventListener('click', () => {
+    if (!selectedEv) {
+      window.alert('삭제할 기록을 테이블에서 선택하세요.')
+      return
+    }
+    if (!window.confirm('이 기록을 삭제할까요?')) return
+    void api(`/api/attendance-events/${selectedEv.id}?store_id=${store!.id}`, { method: 'DELETE' })
+      .then(() => {
+        selectedEventId = null
+        reload()
+      })
+      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
   })
   el.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((btn) => {
     btn.addEventListener('click', (ev) => {

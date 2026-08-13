@@ -73,7 +73,7 @@ def _resolve_department_id(conn: Connection, store_id: int, department_name: str
     )
     row = cur.fetchone()
     if not row:
-        raise HTTPException(status_code=400, detail="부서를 찾을 수 없습니다.")
+        raise HTTPException(status_code=400, detail="지점을 찾을 수 없습니다.")
     return int(row["id"])
 
 
