@@ -1,0 +1,9 @@
+{
+  "name": "알바근태",
+  "short_name": "알바근태",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f0f4f8",
+  "theme_color": "#0d9488",
+  "lang": "ko"
+}

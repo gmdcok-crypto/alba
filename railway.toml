@@ -1,0 +1,6 @@
+[build]
+builder = "NIXPACKS"
+buildCommand = "cd client && npm install --include=optional && npm install --no-save vite@6.4.1 && npx tsc && npx vite build && cd .. && pip install --no-cache-dir -r requirements.txt"
+
+[deploy]
+startCommand = "uvicorn backend.main:app --host 0.0.0.0 --port $PORT --log-level warning"
