@@ -36,6 +36,7 @@ let qrTickTimer = 0
 let selectedDeptId: number | null = null
 let selectedEmpId: number | null = null
 let selectedEventId: number | null = null
+let rawFilterEmpId: number | null = null
 let liveTimer = 0
 
 function esc(s: string): string {
@@ -549,44 +550,68 @@ async function fillEmps(el: Element): Promise<void> {
   })
 }
 
+function sourceLabel(source: string | null): string {
+  if (source === 'QR') return 'QR'
+  if (source === 'MANUAL') return '수동'
+  return source || '-'
+}
+
 async function fillRaw(el: Element): Promise<void> {
-  const from = (document.querySelector<HTMLInputElement>('#raw-from')?.value || todayStr(-7))
-  const to = (document.querySelector<HTMLInputElement>('#raw-to')?.value || todayStr())
+  const from = document.querySelector<HTMLInputElement>('#raw-from')?.value || todayStr(-7)
+  const to = document.querySelector<HTMLInputElement>('#raw-to')?.value || todayStr()
   const [empData, evData] = await Promise.all([
     api<{ items: Employee[] }>(`/api/employees?store_id=${store!.id}`),
     api<{ items: AttendanceEvent[] }>(
-      `/api/attendance-events?store_id=${store!.id}&date_from=${from}&date_to=${to}${selectedEmpId ? `&employee_id=${selectedEmpId}` : ''}`,
+      `/api/attendance-events?store_id=${store!.id}&date_from=${from}&date_to=${to}${rawFilterEmpId ? `&employee_id=${rawFilterEmpId}` : ''}`,
     ),
   ])
   const emps = empData.items
   const events = evData.items
-  const selectedEmp = emps.find((e) => e.id === selectedEmpId) ?? null
   const selectedEv = events.find((e) => e.id === selectedEventId) ?? null
   const occurred = selectedEv?.occurred_at || ''
+  const formEmpNo = selectedEv?.employee_no || ''
+  const empFilterOptions = ['<option value="">전체 사원</option>']
+    .concat(
+      emps.map(
+        (e) =>
+          `<option value="${e.id}" ${rawFilterEmpId === e.id ? 'selected' : ''}>${esc(e.employee_no)} ${esc(e.name)}</option>`,
+      ),
+    )
+    .join('')
+  const empFormOptions = ['<option value="">사원 선택</option>']
+    .concat(
+      emps.map(
+        (e) =>
+          `<option value="${esc(e.employee_no)}" ${formEmpNo === e.employee_no ? 'selected' : ''}>${esc(e.employee_no)} ${esc(e.name)}</option>`,
+      ),
+    )
+    .join('')
   el.innerHTML = `
     <div class="page-toolbar">
       <div class="field"><label>시작일</label><input id="raw-from" type="date" value="${esc(from)}" /></div>
       <div class="field"><label>종료일</label><input id="raw-to" type="date" value="${esc(to)}" /></div>
+      <div class="field"><label>사원</label><select id="raw-emp">${empFilterOptions}</select></div>
       <button class="btn btn-primary" id="raw-search">조회</button>
     </div>
-    <div class="split">
-      <div class="crud-list">
-        <button class="list-item ${selectedEmp ? '' : 'is-active'}" id="raw-all"><div class="t">전체 사원</div></button>
-        ${emps
-          .map(
-            (e) => `
-          <button class="list-item ${selectedEmp?.id === e.id ? 'is-active' : ''}" data-emp="${e.id}">
-            <div class="t">${esc(e.name)}</div>
-            <div class="s">${esc(e.employee_no)}</div>
-          </button>`,
-          )
-          .join('')}
-      </div>
-      <div>
-        <section class="panel" style="margin-bottom:14px">
-          ${
-            events.length
-              ? `<table class="data-table"><thead><tr><th>일시</th><th>사번</th><th>이름</th><th>구분</th></tr></thead><tbody>
+    <div class="split-table">
+      <section class="table-panel">
+        <div class="panel-hd">
+          <h3>출퇴근 기록 ${events.length}건</h3>
+        </div>
+        ${
+          events.length
+            ? `<table class="data-table">
+            <thead>
+              <tr>
+                <th>일시</th>
+                <th>사번</th>
+                <th>이름</th>
+                <th>구분</th>
+                <th>출처</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
               ${events
                 .map(
                   (e) => `
@@ -595,16 +620,30 @@ async function fillRaw(el: Element): Promise<void> {
                   <td>${esc(e.employee_no)}</td>
                   <td>${esc(e.employee_name)}</td>
                   <td>${esc(e.event_label)}</td>
+                  <td>${esc(sourceLabel(e.source))}</td>
+                  <td>
+                    <div class="row-actions">
+                      <button type="button" class="btn btn-danger" data-del="${e.id}">삭제</button>
+                    </div>
+                  </td>
                 </tr>`,
                 )
                 .join('')}
-              </tbody></table>`
-              : '<p class="empty">조회된 원시데이터가 없습니다.</p>'
-          }
-        </section>
+            </tbody>
+          </table>`
+            : '<p class="empty">조회된 원시데이터가 없습니다. 오른쪽에서 기록을 등록하세요.</p>'
+        }
+      </section>
+      <aside class="register-panel">
+        <div class="panel-hd">
+          <div>
+            <h3>${selectedEv ? '기록 수정' : '기록 등록'}</h3>
+            <p>${selectedEv ? '행을 눌러 선택한 기록을 수정합니다.' : '누락된 출근·퇴근을 수동으로 넣습니다.'}</p>
+          </div>
+        </div>
         <form class="crud-form" id="raw-form">
-          <div class="form-grid">
-            <div class="field"><label>사번</label><input id="raw-no" value="${esc(selectedEv?.employee_no || selectedEmp?.employee_no || '')}" /></div>
+          <div class="form-grid" style="grid-template-columns:1fr">
+            <div class="field"><label>사원</label><select id="raw-no">${empFormOptions}</select></div>
             <div class="field"><label>구분</label>
               <select id="raw-type">
                 <option value="IN" ${selectedEv?.event_type === 'IN' || !selectedEv ? 'selected' : ''}>출근</option>
@@ -615,30 +654,23 @@ async function fillRaw(el: Element): Promise<void> {
             <div class="field"><label>시각</label><input id="raw-time" type="time" step="1" value="${esc((occurred.slice(11, 19) || '09:00:00').slice(0, 8))}" /></div>
           </div>
           <div class="form-actions">
-            <button class="btn btn-primary" type="submit">${selectedEv ? '수정' : '추가'}</button>
-            ${selectedEv ? `<button class="btn btn-danger" type="button" id="raw-del">삭제</button>` : ''}
-            ${selectedEv ? `<button class="btn" type="button" id="raw-clear">새 기록</button>` : ''}
+            <button class="btn btn-primary" type="submit">${selectedEv ? '수정 저장' : '등록'}</button>
+            ${selectedEv ? `<button class="btn" type="button" id="raw-clear">새 등록</button>` : ''}
           </div>
         </form>
-      </div>
+      </aside>
     </div>
   `
   const reload = () => void fillRaw(el)
-  document.querySelector('#raw-search')?.addEventListener('click', reload)
-  document.querySelector('#raw-all')?.addEventListener('click', () => {
-    selectedEmpId = null
+  document.querySelector('#raw-search')?.addEventListener('click', () => {
+    const emp = val('raw-emp')
+    rawFilterEmpId = emp ? Number(emp) : null
     selectedEventId = null
     reload()
   })
-  el.querySelectorAll<HTMLButtonElement>('[data-emp]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      selectedEmpId = Number(btn.dataset.emp)
-      selectedEventId = null
-      reload()
-    })
-  })
-  el.querySelectorAll<HTMLTableRowElement>('[data-ev]').forEach((row) => {
-    row.addEventListener('click', () => {
+  el.querySelectorAll<HTMLTableRowElement>('tr[data-ev]').forEach((row) => {
+    row.addEventListener('click', (ev) => {
+      if ((ev.target as HTMLElement).closest('button')) return
       selectedEventId = Number(row.dataset.ev)
       reload()
     })
@@ -662,18 +694,22 @@ async function fillRaw(el: Element): Promise<void> {
       })
       .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
   })
-  document.querySelector('#raw-del')?.addEventListener('click', () => {
-    if (!selectedEv || !window.confirm('이 기록을 삭제할까요?')) return
-    void api(`/api/attendance-events/${selectedEv.id}?store_id=${store!.id}`, { method: 'DELETE' })
-      .then(() => {
-        selectedEventId = null
-        reload()
-      })
-      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
-  })
   document.querySelector('#raw-clear')?.addEventListener('click', () => {
     selectedEventId = null
     reload()
+  })
+  el.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      const id = Number(btn.dataset.del)
+      if (!window.confirm('이 기록을 삭제할까요?')) return
+      void api(`/api/attendance-events/${id}?store_id=${store!.id}`, { method: 'DELETE' })
+        .then(() => {
+          if (selectedEventId === id) selectedEventId = null
+          reload()
+        })
+        .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
+    })
   })
 }
 
