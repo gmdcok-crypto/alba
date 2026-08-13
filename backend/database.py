@@ -17,6 +17,14 @@ load_dotenv(_ROOT / ".env")
 
 DictCursor = "dict"
 
+try:
+    from pymysql.err import IntegrityError as _MysqlIntegrityError
+except ImportError:  # pragma: no cover
+    class _MysqlIntegrityError(Exception):
+        pass
+
+IntegrityError = (sqlite3.IntegrityError, _MysqlIntegrityError)
+
 
 class _SqliteCursor:
     def __init__(self, raw: sqlite3.Cursor) -> None:

@@ -1,4 +1,4 @@
-"""모바일 출퇴근 (QR)."""
+"""모바일 출퇴근 (QR) — 사원(employee) 기준."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from backend.attendance_util import minutes_to_hours_label, pair_sessions
 from backend.database import Connection, get_db
-from backend.deps import get_current_user
+from backend.deps import get_current_employee
 from backend.kiosk_qr import verify_kiosk_qr_payload
 from backend.kst import dt_iso, now_kst, now_kst_str, parse_dt
 
@@ -23,40 +23,33 @@ class ClockQrBody(BaseModel):
     intent: Literal["in", "out"]
 
 
-def _member(conn: Connection, store_id: int, user_id: int) -> dict:
+def _store_owner_id(conn: Connection, store_id: int) -> int:
     cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT m.hourly_wage, m.status, s.name AS store_name, s.lat, s.lng, s.geofence_m
-        FROM store_members m
-        JOIN stores s ON s.id = m.store_id
-        WHERE m.store_id = %s AND m.user_id = %s LIMIT 1
-        """,
-        (store_id, user_id),
-    )
+    cur.execute("SELECT owner_id FROM stores WHERE id = %s LIMIT 1", (store_id,))
     row = cur.fetchone()
-    if not row or row.get("status") != "active":
-        raise HTTPException(status_code=403, detail="이 매장에 소속되어 있지 않습니다.")
-    return row
+    if not row:
+        raise HTTPException(status_code=404, detail="매장을 찾을 수 없습니다.")
+    return int(row["owner_id"])
 
 
-def _today_events(conn: Connection, store_id: int, user_id: int) -> list[dict]:
+def _today_events(conn: Connection, store_id: int, employee_id: int) -> list[dict]:
     today = now_kst().strftime("%Y-%m-%d")
     cur = conn.cursor()
     cur.execute(
         """
         SELECT id, event_type, occurred_at, lat, lng
         FROM attendance_events
-        WHERE store_id = %s AND user_id = %s AND occurred_at >= %s AND occurred_at < %s
+        WHERE store_id = %s AND employee_id = %s
+          AND occurred_at >= %s AND occurred_at < %s
         ORDER BY occurred_at ASC, id ASC
         """,
-        (store_id, user_id, f"{today} 00:00:00", f"{today} 23:59:59.999"),
+        (store_id, employee_id, f"{today} 00:00:00", f"{today} 23:59:59.999"),
     )
     return cur.fetchall() or []
 
 
 def _month_events(
-    conn: Connection, store_id: int, user_id: int, year: int, month: int
+    conn: Connection, store_id: int, employee_id: int, year: int, month: int
 ) -> list[dict]:
     start = datetime(year, month, 1)
     if month == 12:
@@ -68,13 +61,13 @@ def _month_events(
         """
         SELECT event_type, occurred_at, lat, lng
         FROM attendance_events
-        WHERE store_id = %s AND user_id = %s
+        WHERE store_id = %s AND employee_id = %s
           AND occurred_at >= %s AND occurred_at < %s
         ORDER BY occurred_at ASC, id ASC
         """,
         (
             store_id,
-            user_id,
+            employee_id,
             start.strftime("%Y-%m-%d %H:%M:%S"),
             end.strftime("%Y-%m-%d %H:%M:%S"),
         ),
@@ -84,21 +77,20 @@ def _month_events(
 
 @router.get("/today")
 def clock_today(
-    store_id: int,
-    user: dict = Depends(get_current_user),
+    emp: dict = Depends(get_current_employee),
     conn: Connection = Depends(get_db),
 ) -> dict:
-    member = _member(conn, store_id, int(user["id"]))
-    events = _today_events(conn, store_id, int(user["id"]))
+    store_id = int(emp["store_id"])
+    events = _today_events(conn, store_id, int(emp["id"]))
     now = now_kst()
     sessions = pair_sessions(events, until=now)
     last = events[-1] if events else None
     clocked_in = bool(last and last["event_type"] == "IN")
     minutes = sum(int(s["minutes"]) for s in sessions)
-    wage = int(member.get("hourly_wage") or 0)
+    wage = int(emp.get("hourly_wage") or 0)
     pay = int(minutes / 60 * wage) if wage else 0
     return {
-        "store_name": member["store_name"],
+        "store_name": emp.get("store_name") or "",
         "clocked_in": clocked_in,
         "last_in_at": dt_iso(next((e["occurred_at"] for e in reversed(events) if e["event_type"] == "IN"), None)),
         "last_out_at": dt_iso(next((e["occurred_at"] for e in reversed(events) if e["event_type"] == "OUT"), None)),
@@ -107,10 +99,7 @@ def clock_today(
         "hourly_wage": wage,
         "pay_estimate": pay,
         "events": [
-            {
-                "event_type": e["event_type"],
-                "occurred_at": dt_iso(e["occurred_at"]),
-            }
+            {"event_type": e["event_type"], "occurred_at": dt_iso(e["occurred_at"])}
             for e in events
         ],
     }
@@ -120,11 +109,9 @@ def clock_today(
 def clock_with_qr(
     body: ClockQrBody,
     request: Request,
-    user: dict = Depends(get_current_user),
+    emp: dict = Depends(get_current_employee),
     conn: Connection = Depends(get_db),
 ) -> dict:
-    if user.get("role") != "worker":
-        raise HTTPException(status_code=403, detail="알바 계정만 출퇴근할 수 있습니다.")
     try:
         data = json.loads(body.qr.strip())
     except json.JSONDecodeError as e:
@@ -133,9 +120,11 @@ def clock_with_qr(
         raise HTTPException(status_code=400, detail="QR 데이터 형식이 올바르지 않습니다.")
 
     store_id = verify_kiosk_qr_payload(data)
-    _member(conn, store_id, int(user["id"]))
+    if int(emp["store_id"]) != int(store_id):
+        raise HTTPException(status_code=403, detail="다른 매장의 QR입니다.")
+
     event_type = "IN" if body.intent == "in" else "OUT"
-    events = _today_events(conn, store_id, int(user["id"]))
+    events = _today_events(conn, store_id, int(emp["id"]))
     last = events[-1] if events else None
     last_type = last["event_type"] if last else None
 
@@ -151,14 +140,15 @@ def clock_with_qr(
 
     ua = (request.headers.get("user-agent") or "")[:250]
     now = now_kst_str()
+    owner_id = _store_owner_id(conn, store_id)
     cur = conn.cursor()
     cur.execute(
         """
         INSERT INTO attendance_events
-          (store_id, user_id, event_type, occurred_at, lat, lng, source, device_info, created_at)
-        VALUES (%s, %s, %s, %s, NULL, NULL, 'QR', %s, %s)
+          (store_id, user_id, employee_id, event_type, occurred_at, lat, lng, source, device_info, created_at)
+        VALUES (%s, %s, %s, %s, %s, NULL, NULL, 'QR', %s, %s)
         """,
-        (store_id, user["id"], event_type, now, ua or None, now),
+        (store_id, owner_id, emp["id"], event_type, now, ua or None, now),
     )
     conn.commit()
     return {
@@ -171,18 +161,17 @@ def clock_with_qr(
 
 @router.get("/records")
 def records(
-    store_id: int,
     year: int,
     month: int,
-    user: dict = Depends(get_current_user),
+    emp: dict = Depends(get_current_employee),
     conn: Connection = Depends(get_db),
 ) -> dict:
-    member = _member(conn, store_id, int(user["id"]))
-    events = _month_events(conn, store_id, int(user["id"]), year, month)
+    store_id = int(emp["store_id"])
+    events = _month_events(conn, store_id, int(emp["id"]), year, month)
     sessions = pair_sessions(events, until=now_kst())
     minutes = sum(int(s["minutes"]) for s in sessions if not s["open"])
     open_minutes = sum(int(s["minutes"]) for s in sessions if s["open"])
-    wage = int(member.get("hourly_wage") or 0)
+    wage = int(emp.get("hourly_wage") or 0)
     pay = int(minutes / 60 * wage) if wage else 0
     return {
         "year": year,

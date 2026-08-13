@@ -70,6 +70,44 @@ _SQLITE_DDL = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_events_user_time ON attendance_events (user_id, store_id, occurred_at)",
+    """
+    CREATE TABLE IF NOT EXISTS departments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      store_id INTEGER NOT NULL,
+      code TEXT NOT NULL,
+      name TEXT NOT NULL,
+      UNIQUE (store_id, code),
+      FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS employees (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      store_id INTEGER NOT NULL,
+      employee_no TEXT NOT NULL,
+      name TEXT NOT NULL,
+      department_id INTEGER NULL,
+      hire_date TEXT NULL,
+      status TEXT NOT NULL DEFAULT '재직',
+      password_hash TEXT NULL,
+      auth_status TEXT NOT NULL DEFAULT 'X',
+      hourly_wage INTEGER NOT NULL DEFAULT 0,
+      UNIQUE (store_id, employee_no),
+      FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE,
+      FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS employee_refresh_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id INTEGER NOT NULL,
+      jti TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      revoked INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+    )
+    """,
 ]
 
 _MYSQL_DDL = [
@@ -142,7 +180,72 @@ _MYSQL_DDL = [
       KEY idx_refresh_user (user_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
+    """
+    CREATE TABLE IF NOT EXISTS departments (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      store_id BIGINT UNSIGNED NOT NULL,
+      code VARCHAR(32) NOT NULL,
+      name VARCHAR(64) NOT NULL,
+      PRIMARY KEY (id),
+      UNIQUE KEY uk_dept_store_code (store_id, code),
+      KEY idx_dept_store (store_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS employees (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      store_id BIGINT UNSIGNED NOT NULL,
+      employee_no VARCHAR(32) NOT NULL,
+      name VARCHAR(64) NOT NULL,
+      department_id BIGINT UNSIGNED NULL,
+      hire_date DATE NULL,
+      status VARCHAR(16) NOT NULL DEFAULT '재직',
+      password_hash VARCHAR(255) NULL,
+      auth_status CHAR(1) NOT NULL DEFAULT 'X',
+      hourly_wage INT NOT NULL DEFAULT 0,
+      PRIMARY KEY (id),
+      UNIQUE KEY uk_emp_store_no (store_id, employee_no),
+      KEY idx_emp_store (store_id),
+      KEY idx_emp_dept (department_id),
+      KEY idx_emp_name (name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS employee_refresh_tokens (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      employee_id BIGINT UNSIGNED NOT NULL,
+      jti VARCHAR(64) NOT NULL,
+      expires_at DATETIME(3) NOT NULL,
+      revoked TINYINT NOT NULL DEFAULT 0,
+      created_at DATETIME(3) NOT NULL,
+      PRIMARY KEY (id),
+      UNIQUE KEY uk_emp_refresh_jti (jti),
+      KEY idx_emp_refresh (employee_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
 ]
+
+
+def _column_names(conn: Connection, table: str) -> set[str]:
+    cur = conn.cursor()
+    if conn.kind == "mysql":
+        cur.execute(f"SHOW COLUMNS FROM `{table}`")
+        rows = cur.fetchall() or []
+        return {str(r.get("Field") or r.get("field") or "") for r in rows}
+    cur.execute(f"PRAGMA table_info({table})")
+    rows = cur.fetchall() or []
+    return {str(r.get("name") or "") for r in rows}
+
+
+def _add_column_if_missing(
+    conn: Connection, table: str, column: str, sqlite_sql: str, mysql_sql: str
+) -> None:
+    if column in _column_names(conn, table):
+        return
+    cur = conn.cursor()
+    col_sql = mysql_sql if conn.kind == "mysql" else sqlite_sql
+    table_sql = f"`{table}`" if conn.kind == "mysql" else table
+    cur.execute(f"ALTER TABLE {table_sql} ADD COLUMN {col_sql}")
 
 
 def ensure_schema(conn: Connection) -> None:
@@ -150,4 +253,27 @@ def ensure_schema(conn: Connection) -> None:
     cur = conn.cursor()
     for stmt in ddl:
         cur.execute(stmt)
+    _add_column_if_missing(
+        conn,
+        "attendance_events",
+        "employee_id",
+        "employee_id INTEGER NULL",
+        "employee_id BIGINT UNSIGNED NULL",
+    )
+    conn.commit()
+    cur = conn.cursor()
+    try:
+        if conn.kind == "mysql":
+            cur.execute(
+                "CREATE INDEX idx_events_emp_time ON attendance_events (employee_id, store_id, occurred_at)"
+            )
+        else:
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_events_emp_time ON attendance_events (employee_id, store_id, occurred_at)"
+            )
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
     conn.commit()

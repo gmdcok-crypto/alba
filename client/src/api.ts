@@ -5,6 +5,42 @@ export type User = {
   login_id: string
   name: string
   role: Role
+  employee_no?: string
+  store_id?: number
+  store_name?: string
+  hourly_wage?: number
+  auth_status?: string
+}
+
+export type Department = {
+  id: number
+  store_id: number
+  code: string
+  name: string
+}
+
+export type Employee = {
+  id: number
+  store_id: number
+  employee_no: string
+  name: string
+  department_id: number | null
+  department_name: string | null
+  hire_date: string | null
+  status: string
+  auth_status: string
+  auth_label: string
+  hourly_wage: number
+}
+
+export type AttendanceEvent = {
+  id: number
+  event_type: string
+  event_label: string
+  occurred_at: string
+  source: string | null
+  employee_no: string
+  employee_name: string
 }
 
 export type Store = {
@@ -50,8 +86,19 @@ export type Records = {
 
 export type Live = {
   date: string
-  working: { user_id: number; name: string; last_at: string | null }[]
-  off: { user_id: number; name: string }[]
+  working: {
+    employee_id: number
+    employee_no: string
+    name: string
+    department_name?: string
+    last_at: string | null
+  }[]
+  off: {
+    employee_id: number
+    employee_no: string
+    name: string
+    department_name?: string
+  }[]
 }
 
 export type Member = {
@@ -74,7 +121,7 @@ function detailMessage(data: unknown, fallback: string): string {
   return fallback
 }
 
-export function createSession(prefix: string) {
+export function createSession(prefix: string, refreshPath = '/api/auth/refresh') {
   const ACCESS_KEY = `${prefix}_access`
   const REFRESH_KEY = `${prefix}_refresh`
   const USER_KEY = `${prefix}_user`
@@ -113,7 +160,7 @@ export function createSession(prefix: string) {
   async function tryRefresh(): Promise<boolean> {
     const refresh = localStorage.getItem(REFRESH_KEY)
     if (!refresh) return false
-    const res = await fetch('/api/auth/refresh', {
+    const res = await fetch(refreshPath, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refresh }),
@@ -153,7 +200,7 @@ export function createSession(prefix: string) {
   return { getUser, setSession, clearSession, getStoreId, setStoreId, api, STORE_KEY }
 }
 
-export const workerSession = createSession('alba_worker')
+export const workerSession = createSession('alba_worker', '/api/auth/worker/refresh')
 export const adminSession = createSession('alba_admin')
 
 export function money(n: number): string {

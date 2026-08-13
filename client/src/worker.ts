@@ -10,17 +10,15 @@ import {
   type User,
 } from './api'
 
-const { api, getUser, setSession, clearSession, getStoreId, setStoreId } = workerSession
+const { api, getUser, setSession, clearSession, setStoreId } = workerSession
 
 const mounted = document.querySelector<HTMLDivElement>('#app')
 if (!mounted) throw new Error('#app missing')
 const root: HTMLDivElement = mounted
 
 let user = getUser()
-let stores: Store[] = []
 let store: Store | null = null
 let tab: 'home' | 'list' | 'more' = 'home'
-let authMode: 'login' | 'signup' = 'login'
 let view: 'app' | 'scan' = 'app'
 let pendingIntent: 'in' | 'out' = 'in'
 let clockTimer = 0
@@ -37,25 +35,24 @@ function clockText(d = new Date()): string {
   return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
-function pickStore(): Store | null {
-  const saved = getStoreId()
-  if (saved && stores.some((s) => s.id === saved)) {
-    return stores.find((s) => s.id === saved) ?? null
+function storeFromUser(u: User | null): Store | null {
+  if (!u?.store_id) return null
+  return {
+    id: u.store_id,
+    owner_id: 0,
+    name: u.store_name || '',
+    invite_code: '',
+    lat: null,
+    lng: null,
+    geofence_m: 0,
+    hourly_wage: u.hourly_wage || 0,
+    status: 'active',
   }
-  return stores[0] ?? null
-}
-
-async function loadStores(): Promise<void> {
-  const data = await api<{ items: Store[] }>('/api/stores')
-  stores = data.items
-  store = pickStore()
-  if (store) setStoreId(store.id)
 }
 
 function logout(): void {
   clearSession()
   user = null
-  stores = []
   store = null
   tab = 'home'
   view = 'app'
@@ -71,8 +68,10 @@ function render(): void {
     window.location.replace('/admin.html')
     return
   }
+  store = storeFromUser(user)
   if (!store) {
-    renderOnboard()
+    root.innerHTML = `<div class="auth-shell"><p class="auth-desc">매장 정보가 없습니다. 관리자에게 문의하세요.</p><button class="auth-switch" id="logout">로그아웃</button></div>`
+    root.querySelector('#logout')?.addEventListener('click', logout)
     return
   }
   if (view === 'scan') {
@@ -83,34 +82,28 @@ function render(): void {
 }
 
 function renderAuth(): void {
-  const isSignup = authMode === 'signup'
   root.innerHTML = `
     <div class="auth-shell">
       <div class="auth-brand">알바근태</div>
       <p class="auth-tag">매장 QR을 찍어 출근 · 퇴근</p>
       <div class="auth-panel">
-        <h2 class="auth-title">${isSignup ? '알바 회원가입' : '알바 로그인'}</h2>
-        <p class="auth-desc">${isSignup ? '이름과 아이디를 입력하세요.' : '아이디와 비밀번호를 입력하세요.'}</p>
-        ${isSignup ? `<div class="auth-field"><label>이름</label><input id="name" autocomplete="name" /></div>` : ''}
-        <div class="auth-field"><label>아이디</label><input id="login_id" autocomplete="username" /></div>
-        <div class="auth-field"><label>비밀번호</label><input id="password" type="password" autocomplete="${isSignup ? 'new-password' : 'current-password'}" /></div>
+        <h2 class="auth-title">알바 로그인</h2>
+        <p class="auth-desc">관리자에게 등록된 이름과 사번으로 로그인하세요. 처음이거나 인증이 취소된 경우 이름과 새 비밀번호를 함께 입력합니다.</p>
+        <div class="auth-field"><label>사번</label><input id="employee_no" autocomplete="username" /></div>
+        <div class="auth-field"><label>이름</label><input id="name" autocomplete="name" placeholder="첫 로그인·인증취소 시 필수" /></div>
+        <div class="auth-field"><label>비밀번호</label><input id="password" type="password" autocomplete="current-password" /></div>
         <p class="auth-error" id="auth-error" hidden></p>
-        <button class="btn-primary auth-submit" id="auth-submit">${isSignup ? '가입하기' : '로그인'}</button>
-        <button class="auth-switch" id="auth-switch">${isSignup ? '이미 계정이 있나요? 로그인' : '처음이신가요? 회원가입'}</button>
+        <button class="btn-primary auth-submit" id="auth-submit">로그인</button>
         <a class="auth-switch" href="/admin.html" style="display:block;text-align:center;text-decoration:none;margin-top:8px">사장님이신가요?</a>
       </div>
     </div>
   `
-  root.querySelector('#auth-switch')?.addEventListener('click', () => {
-    authMode = isSignup ? 'login' : 'signup'
-    renderAuth()
-  })
   root.querySelector('#auth-submit')?.addEventListener('click', () => void submitAuth())
 }
 
 async function submitAuth(): Promise<void> {
   const err = document.querySelector<HTMLParagraphElement>('#auth-error')
-  const loginId = (document.querySelector<HTMLInputElement>('#login_id')?.value || '').trim()
+  const employeeNo = (document.querySelector<HTMLInputElement>('#employee_no')?.value || '').trim()
   const password = document.querySelector<HTMLInputElement>('#password')?.value || ''
   const name = (document.querySelector<HTMLInputElement>('#name')?.value || '').trim()
   if (err) {
@@ -118,59 +111,14 @@ async function submitAuth(): Promise<void> {
     err.textContent = ''
   }
   try {
-    const path = authMode === 'signup' ? '/api/auth/signup' : '/api/auth/login'
-    const body =
-      authMode === 'signup'
-        ? { login_id: loginId, password, name, role: 'worker' as const }
-        : { login_id: loginId, password }
-    const data = await api<{ access_token: string; refresh_token: string; user: User }>(path, {
+    const data = await api<{ access_token: string; refresh_token: string; user: User }>('/api/auth/worker/login', {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: JSON.stringify({ employee_no: employeeNo, name, password }),
     })
-    if (data.user.role === 'owner') {
-      window.location.replace('/admin.html')
-      return
-    }
     setSession(data.access_token, data.refresh_token, data.user)
     user = data.user
-    await loadStores()
-    render()
-  } catch (e) {
-    if (err) {
-      err.hidden = false
-      err.textContent = e instanceof Error ? e.message : '실패했습니다.'
-    }
-  }
-}
-
-function renderOnboard(): void {
-  root.innerHTML = `
-    <div class="auth-shell">
-      <div class="auth-brand">알바근태</div>
-      <h2 class="auth-title">매장에 입장하세요</h2>
-      <p class="auth-desc">사장님에게 받은 6자리 초대코드를 입력하세요.</p>
-      <div class="auth-field">
-        <label>초대코드</label>
-        <input id="onboard-input" style="text-transform:uppercase;letter-spacing:.12em" />
-      </div>
-      <p class="auth-error" id="auth-error" hidden></p>
-      <button class="btn-primary auth-submit" id="onboard-go">입장</button>
-      <button class="auth-switch" id="logout">다른 계정으로</button>
-    </div>
-  `
-  root.querySelector('#logout')?.addEventListener('click', logout)
-  root.querySelector('#onboard-go')?.addEventListener('click', () => void submitOnboard())
-}
-
-async function submitOnboard(): Promise<void> {
-  const err = document.querySelector<HTMLParagraphElement>('#auth-error')
-  const value = (document.querySelector<HTMLInputElement>('#onboard-input')?.value || '').trim()
-  try {
-    await api('/api/stores/join', {
-      method: 'POST',
-      body: JSON.stringify({ invite_code: value.toUpperCase() }),
-    })
-    await loadStores()
+    store = storeFromUser(user)
+    if (store) setStoreId(store.id)
     render()
   } catch (e) {
     if (err) {
@@ -242,10 +190,10 @@ async function fillHome(el: Element): Promise<void> {
     if (clockEl) clockEl.textContent = clockText()
   }, 1000)
   try {
-    const today = await api<Today>(`/api/clock/today?store_id=${store!.id}`)
+    const today = await api<Today>('/api/clock/today')
     const now = new Date()
     const month = await api<Records>(
-      `/api/clock/records?store_id=${store!.id}&year=${now.getFullYear()}&month=${now.getMonth() + 1}`,
+      `/api/clock/records?year=${now.getFullYear()}&month=${now.getMonth() + 1}`,
     )
     const body = document.querySelector('#home-body')
     if (!body) return
@@ -364,7 +312,7 @@ async function fillRecords(el: Element): Promise<void> {
   `
   try {
     const data = await api<Records>(
-      `/api/clock/records?store_id=${store!.id}&year=${now.getFullYear()}&month=${now.getMonth() + 1}`,
+      `/api/clock/records?year=${now.getFullYear()}&month=${now.getMonth() + 1}`,
     )
     const body = document.querySelector('#list-body')
     if (!body) return
@@ -399,52 +347,27 @@ async function fillRecords(el: Element): Promise<void> {
 }
 
 function fillMore(el: Element): void {
-  const storeOptions = stores
-    .map((s) => `<option value="${s.id}" ${store?.id === s.id ? 'selected' : ''}>${s.name}</option>`)
-    .join('')
   el.innerHTML = `
     <header class="screen-header">
       <h1>더보기</h1>
-      <p class="sub">${user?.name} · 알바</p>
+      <p class="sub">${user?.name} · 사번 ${user?.employee_no || user?.login_id || ''}</p>
     </header>
     <div class="pad">
-      ${
-        stores.length > 1
-          ? `<div class="auth-field"><label>매장</label>
-             <select id="store-select" class="field-select">${storeOptions}</select></div>`
-          : ''
-      }
-      <button class="btn-secondary" id="join-more" style="width:100%;margin:0 0 16px">다른 매장 입장</button>
+      <p class="empty" style="text-align:left;margin:0 0 16px">계정은 관리자가 등록합니다. 퇴사·인증취소 후에는 다시 로그인할 수 없습니다.</p>
     </div>
     <div class="menu-list">
       <button class="menu-item" id="logout"><span>로그아웃</span><span class="chev">›</span></button>
     </div>
   `
   document.querySelector('#logout')?.addEventListener('click', logout)
-  document.querySelector('#store-select')?.addEventListener('change', (ev) => {
-    const id = Number((ev.target as HTMLSelectElement).value)
-    setStoreId(id)
-    store = stores.find((s) => s.id === id) ?? store
-    renderMain()
-  })
-  document.querySelector('#join-more')?.addEventListener('click', () => {
-    const code = window.prompt('초대코드')
-    if (!code) return
-    void api('/api/stores/join', {
-      method: 'POST',
-      body: JSON.stringify({ invite_code: code.trim().toUpperCase() }),
-    })
-      .then(() => loadStores())
-      .then(() => render())
-      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
-  })
 }
 
 async function boot(): Promise<void> {
   if (user) {
     try {
-      user = await api<User>('/api/auth/me')
-      await loadStores()
+      user = await api<User>('/api/auth/worker/me')
+      store = storeFromUser(user)
+      if (store) setStoreId(store.id)
     } catch {
       logout()
       return

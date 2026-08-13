@@ -35,11 +35,12 @@ def live(
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT u.id AS user_id, u.name, m.hourly_wage
-        FROM store_members m
-        JOIN users u ON u.id = m.user_id
-        WHERE m.store_id = %s AND m.status = 'active' AND u.role = 'worker'
-        ORDER BY u.name ASC
+        SELECT e.id AS employee_id, e.employee_no, e.name, e.hourly_wage, e.status,
+               d.name AS department_name
+        FROM employees e
+        LEFT JOIN departments d ON d.id = e.department_id
+        WHERE e.store_id = %s AND e.status <> '퇴사'
+        ORDER BY e.name ASC
         """,
         (store_id,),
     )
@@ -51,17 +52,20 @@ def live(
             """
             SELECT event_type, occurred_at
             FROM attendance_events
-            WHERE store_id = %s AND user_id = %s
+            WHERE store_id = %s AND employee_id = %s
               AND occurred_at >= %s AND occurred_at < %s
             ORDER BY occurred_at DESC, id DESC
             LIMIT 1
             """,
-            (store_id, mem["user_id"], f"{today} 00:00:00", f"{today} 23:59:59.999"),
+            (store_id, mem["employee_id"], f"{today} 00:00:00", f"{today} 23:59:59.999"),
         )
         last = cur.fetchone()
         item = {
-            "user_id": mem["user_id"],
+            "employee_id": mem["employee_id"],
+            "employee_no": mem["employee_no"],
+            "user_id": mem["employee_id"],
             "name": mem["name"],
+            "department_name": mem.get("department_name") or "",
             "hourly_wage": mem["hourly_wage"],
             "last_at": dt_iso(last["occurred_at"]) if last else None,
             "clocked_in": bool(last and last["event_type"] == "IN"),
@@ -91,11 +95,10 @@ def day_records(
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT u.id AS user_id, u.name, m.hourly_wage
-        FROM store_members m
-        JOIN users u ON u.id = m.user_id
-        WHERE m.store_id = %s AND m.status = 'active'
-        ORDER BY u.role DESC, u.name ASC
+        SELECT e.id AS employee_id, e.name, e.hourly_wage
+        FROM employees e
+        WHERE e.store_id = %s AND e.status <> '퇴사'
+        ORDER BY e.name ASC
         """,
         (store_id,),
     )
@@ -106,11 +109,11 @@ def day_records(
             """
             SELECT event_type, occurred_at
             FROM attendance_events
-            WHERE store_id = %s AND user_id = %s
+            WHERE store_id = %s AND employee_id = %s
               AND occurred_at >= %s AND occurred_at < %s
             ORDER BY occurred_at ASC, id ASC
             """,
-            (store_id, mem["user_id"], start, end),
+            (store_id, mem["employee_id"], start, end),
         )
         events = cur.fetchall() or []
         if not events:
@@ -120,7 +123,8 @@ def day_records(
         wage = int(mem.get("hourly_wage") or 0)
         items.append(
             {
-                "user_id": mem["user_id"],
+                "user_id": mem["employee_id"],
+                "employee_id": mem["employee_id"],
                 "name": mem["name"],
                 "hourly_wage": wage,
                 "minutes": minutes,
