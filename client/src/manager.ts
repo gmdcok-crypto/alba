@@ -243,27 +243,40 @@ async function fillEmps(el: Element): Promise<void> {
   const branch = user?.department_name || ''
   el.innerHTML = `
     <header class="screen-header">
-      <h1>사원 등록</h1>
+      <h1>사원관리</h1>
       <p class="sub">${esc(branch)} · ${items.length}명</p>
     </header>
-    <div class="pad">
-      ${
-        items.length
-          ? items
+    ${
+      items.length
+        ? `<div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>사번</th>
+              <th>이름</th>
+              <th>상태</th>
+              <th>인증</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items
               .map(
                 (e) => `
-          <div class="person-row" data-id="${e.id}" style="cursor:pointer${selected?.id === e.id ? ';background:var(--primary-soft);margin:0 -8px;padding-left:8px;padding-right:8px;border-radius:8px' : ''}">
-            <div>
-              <div class="name">${esc(e.name)} <span class="badge ${e.auth_status === 'O' ? 'badge-in' : 'badge-open'}">${esc(e.auth_label)}</span></div>
-              <div class="meta">${esc(e.employee_no)} · ${esc(e.status)}</div>
-            </div>
-            <button type="button" class="badge badge-out" data-revoke="${e.id}">인증취소</button>
-          </div>`,
+              <tr class="${selected?.id === e.id ? 'is-active' : ''}" data-id="${e.id}">
+                <td>${esc(e.employee_no)}</td>
+                <td>${esc(e.name)}</td>
+                <td>${esc(e.status)}</td>
+                <td><span class="badge ${e.auth_status === 'O' ? 'badge-in' : 'badge-open'}">${esc(e.auth_label)}</span></td>
+                <td><button type="button" class="table-link" data-revoke="${e.id}">인증취소</button></td>
+              </tr>`,
               )
-              .join('')
-          : '<p class="empty" style="margin:0 0 16px">아직 등록된 사원이 없습니다.</p>'
-      }
-    </div>
+              .join('')}
+          </tbody>
+        </table>
+      </div>`
+        : '<p class="empty" style="margin:8px 20px 16px">아직 등록된 사원이 없습니다.</p>'
+    }
     <div class="pad">
       <p class="sub" style="margin:0 0 12px;font-weight:700">${selected ? '사원 수정' : '새 사원 등록'}</p>
       <div class="auth-field"><label>사번</label><input id="emp-no" value="${esc(selected?.employee_no || '')}" /></div>
@@ -285,7 +298,7 @@ async function fillEmps(el: Element): Promise<void> {
     </div>
   `
   const reload = () => void fillEmps(el)
-  el.querySelectorAll<HTMLElement>('.person-row[data-id]').forEach((row) => {
+  el.querySelectorAll<HTMLTableRowElement>('tbody tr[data-id]').forEach((row) => {
     row.addEventListener('click', (ev) => {
       if ((ev.target as HTMLElement).closest('[data-revoke]')) return
       selectedEmpId = Number(row.dataset.id)
@@ -328,7 +341,7 @@ async function fillEmps(el: Element): Promise<void> {
   })
   el.querySelector('#emp-update')?.addEventListener('click', () => {
     if (!selected) {
-      window.alert('수정할 사원을 목록에서 선택하세요.')
+      window.alert('수정할 사원을 테이블에서 선택하세요.')
       return
     }
     const body = payload()
@@ -342,7 +355,7 @@ async function fillEmps(el: Element): Promise<void> {
   })
   el.querySelector('#emp-delete')?.addEventListener('click', () => {
     if (!selected) {
-      window.alert('삭제할 사원을 목록에서 선택하세요.')
+      window.alert('삭제할 사원을 테이블에서 선택하세요.')
       return
     }
     if (!window.confirm('사원을 삭제할까요?')) return
