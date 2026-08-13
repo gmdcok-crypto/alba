@@ -1,0 +1,9 @@
+{
+  "name": "알바근태 점장",
+  "short_name": "점장",
+  "start_url": "/manager.html",
+  "display": "standalone",
+  "background_color": "#f0f4f8",
+  "theme_color": "#0d9488",
+  "lang": "ko"
+}

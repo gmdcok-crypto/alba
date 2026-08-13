@@ -24,6 +24,7 @@ export default defineConfig({
         main: 'index.html',
         admin: 'admin.html',
         tablet: 'tablet.html',
+        manager: 'manager.html',
       },
     },
   },

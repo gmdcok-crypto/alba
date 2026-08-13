@@ -104,23 +104,15 @@ function render(): void {
     renderAuth()
     return
   }
-  if (user.role !== 'owner' && user.role !== 'manager') {
+  if (user.role === 'manager') {
+    window.location.replace('/manager.html')
+    return
+  }
+  if (user.role !== 'owner') {
     window.location.replace('/')
     return
   }
   if (!store) {
-    if (isManager()) {
-      root.innerHTML = `
-        <div class="auth-esl">
-          <div class="auth-esl-card">
-            <h1>지점이 없습니다</h1>
-            <p>배정된 매장을 찾을 수 없습니다. 관리자에게 문의하세요.</p>
-            <button class="auth-switch" id="logout">로그아웃</button>
-          </div>
-        </div>`
-      root.querySelector('#logout')?.addEventListener('click', logout)
-      return
-    }
     renderOnboard()
     return
   }
@@ -142,6 +134,7 @@ function renderAuth(): void {
           <button class="btn btn-primary" id="auth-submit" style="width:100%">${isSignup ? '가입하기' : '로그인'}</button>
         </div>
         <button class="auth-switch" id="auth-switch">${isSignup ? '이미 계정이 있나요? 로그인' : '처음이신가요? 회원가입'}</button>
+        <a class="auth-switch" href="/manager.html">점장 앱으로</a>
         <a class="auth-switch" href="/">알바 출퇴근으로</a>
       </div>
     </div>
@@ -165,7 +158,12 @@ async function submitAuth(): Promise<void> {
       method: 'POST',
       body: JSON.stringify(body),
     })
-    if (data.user.role !== 'owner' && data.user.role !== 'manager') {
+    if (data.user.role === 'manager') {
+      setSession(data.access_token, data.refresh_token, data.user)
+      window.location.replace('/manager.html')
+      return
+    }
+    if (data.user.role !== 'owner') {
       window.location.replace('/')
       return
     }

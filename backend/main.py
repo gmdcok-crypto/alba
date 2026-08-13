@@ -163,6 +163,11 @@ def tablet_kiosk() -> Union[FileResponse, JSONResponse]:
     return _html("tablet.html")
 
 
+@app.get("/manager.html", response_model=None)
+def manager_pwa() -> Union[FileResponse, JSONResponse]:
+    return _html("manager.html")
+
+
 if _STATIC_DIST.exists():
     app.mount("/", StaticFiles(directory=_STATIC_DIST, html=True), name="frontend")
 else:
