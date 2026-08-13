@@ -417,49 +417,89 @@ async function fillEmps(el: Element): Promise<void> {
     )
     .join('')
   el.innerHTML = `
-    <div class="split">
-      <div class="crud-list">
-        <button class="list-item ${selected ? '' : 'is-active'}" id="emp-new"><div class="t">+ 새 사원</div></button>
-        ${items
-          .map(
-            (e) => `
-          <button class="list-item ${selected?.id === e.id ? 'is-active' : ''}" data-id="${e.id}">
-            <div class="t">${esc(e.name)} <span class="badge ${e.auth_status === 'O' ? 'badge-ok' : 'badge-warn'}">${esc(e.auth_label)}</span></div>
-            <div class="s">${esc(e.employee_no)} · ${esc(e.department_name || '미지정')} · ${esc(e.status)}</div>
-          </button>`,
-          )
-          .join('')}
-      </div>
-      <form class="crud-form" id="emp-form">
-        <div class="form-grid">
-          <div class="field"><label>사번</label><input id="emp-no" value="${esc(selected?.employee_no || '')}" /></div>
-          <div class="field"><label>이름</label><input id="emp-name" value="${esc(selected?.name || '')}" /></div>
-          <div class="field"><label>부서</label><select id="emp-dept">${deptOptions}</select></div>
-          <div class="field"><label>입사일</label><input id="emp-hire" type="date" value="${esc(selected?.hire_date || todayStr())}" /></div>
-          <div class="field"><label>상태</label>
-            <select id="emp-status">
-              <option ${selected?.status === '재직' || !selected ? 'selected' : ''}>재직</option>
-              <option ${selected?.status === '퇴사' ? 'selected' : ''}>퇴사</option>
-            </select>
+    <div class="split-table">
+      <section class="table-panel">
+        <div class="panel-hd">
+          <h3>등록 사원 ${items.length}명</h3>
+        </div>
+        ${
+          items.length
+            ? `<table class="data-table">
+            <thead>
+              <tr>
+                <th>사번</th>
+                <th>이름</th>
+                <th>부서</th>
+                <th>입사일</th>
+                <th>상태</th>
+                <th>인증</th>
+                <th class="num">시급</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items
+                .map(
+                  (e) => `
+                <tr class="${selected?.id === e.id ? 'is-active' : ''}" data-id="${e.id}" style="cursor:pointer">
+                  <td>${esc(e.employee_no)}</td>
+                  <td>${esc(e.name)}</td>
+                  <td>${esc(e.department_name || '-')}</td>
+                  <td>${esc(e.hire_date || '-')}</td>
+                  <td>${esc(e.status)}</td>
+                  <td><span class="badge ${e.auth_status === 'O' ? 'badge-ok' : 'badge-warn'}">${esc(e.auth_label)}</span></td>
+                  <td class="num">${Number(e.hourly_wage || 0).toLocaleString('ko-KR')}</td>
+                  <td>
+                    <div class="row-actions">
+                      <button type="button" class="btn" data-revoke="${e.id}">인증취소</button>
+                      <button type="button" class="btn btn-danger" data-del="${e.id}">삭제</button>
+                    </div>
+                  </td>
+                </tr>`,
+                )
+                .join('')}
+            </tbody>
+          </table>`
+            : '<p class="empty">등록된 사원이 없습니다. 오른쪽에서 사원을 등록하세요.</p>'
+        }
+      </section>
+      <aside class="register-panel">
+        <div class="panel-hd">
+          <div>
+            <h3>${selected ? '사원 수정' : '사원 등록'}</h3>
+            <p>${selected ? '행을 눌러 선택한 사원을 수정합니다.' : '이름과 사번으로 알바 앱에 로그인합니다.'}</p>
           </div>
-          <div class="field"><label>시급</label><input id="emp-wage" type="number" min="0" value="${selected?.hourly_wage ?? 0}" /></div>
         </div>
-        <p class="empty" style="text-align:left;padding:12px 0 0">알바 앱 첫 로그인은 이름+사번+비밀번호입니다. 퇴사 또는 인증취소 시 다시 비밀번호를 설정해야 합니다.</p>
-        <div class="form-actions">
-          <button class="btn btn-primary" type="submit">저장</button>
-          ${selected ? `<button class="btn btn-danger" type="button" id="emp-revoke">인증취소</button>` : ''}
-          ${selected ? `<button class="btn" type="button" id="emp-del">삭제</button>` : ''}
-        </div>
-      </form>
+        <form class="crud-form" id="emp-form">
+          <div class="form-grid" style="grid-template-columns:1fr">
+            <div class="field"><label>사번</label><input id="emp-no" value="${esc(selected?.employee_no || '')}" /></div>
+            <div class="field"><label>이름</label><input id="emp-name" value="${esc(selected?.name || '')}" /></div>
+            <div class="field"><label>부서</label><select id="emp-dept">${deptOptions}</select></div>
+            <div class="field"><label>입사일</label><input id="emp-hire" type="date" value="${esc(selected?.hire_date || todayStr())}" /></div>
+            <div class="field"><label>상태</label>
+              <select id="emp-status">
+                <option ${selected?.status === '재직' || !selected ? 'selected' : ''}>재직</option>
+                <option ${selected?.status === '퇴사' ? 'selected' : ''}>퇴사</option>
+              </select>
+            </div>
+            <div class="field"><label>시급</label><input id="emp-wage" type="number" min="0" value="${selected?.hourly_wage ?? 0}" /></div>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">${selected ? '수정 저장' : '등록'}</button>
+            ${selected ? `<button class="btn" type="button" id="emp-new">새 등록</button>` : ''}
+          </div>
+        </form>
+      </aside>
     </div>
   `
   document.querySelector('#emp-new')?.addEventListener('click', () => {
     selectedEmpId = null
     void fillEmps(el)
   })
-  el.querySelectorAll<HTMLButtonElement>('[data-id]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      selectedEmpId = Number(btn.dataset.id)
+  el.querySelectorAll<HTMLTableRowElement>('tr[data-id]').forEach((row) => {
+    row.addEventListener('click', (ev) => {
+      if ((ev.target as HTMLElement).closest('button')) return
+      selectedEmpId = Number(row.dataset.id)
       void fillEmps(el)
     })
   })
@@ -478,28 +518,34 @@ async function fillEmps(el: Element): Promise<void> {
       ? api(`/api/employees/${selected.id}`, { method: 'PUT', body: JSON.stringify(payload) })
       : api('/api/employees', { method: 'POST', body: JSON.stringify(payload) })
     void req
-      .then(async (res) => {
-        if (!selected && res && typeof res === 'object' && 'id' in res) {
-          selectedEmpId = Number((res as { id: number }).id)
-        }
-        await fillEmps(el)
-      })
-      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
-  })
-  document.querySelector('#emp-revoke')?.addEventListener('click', () => {
-    if (!selected || !window.confirm('모바일 인증을 취소할까요? 알바가 다시 이름·사번으로 비밀번호를 설정해야 합니다.')) return
-    void api(`/api/employees/${selected.id}/revoke-auth`, { method: 'POST' })
-      .then(() => fillEmps(el))
-      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
-  })
-  document.querySelector('#emp-del')?.addEventListener('click', () => {
-    if (!selected || !window.confirm('사원을 삭제할까요?')) return
-    void api(`/api/employees/${selected.id}`, { method: 'DELETE' })
       .then(() => {
         selectedEmpId = null
         return fillEmps(el)
       })
       .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
+  })
+  el.querySelectorAll<HTMLButtonElement>('[data-revoke]').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      const id = Number(btn.dataset.revoke)
+      if (!window.confirm('모바일 인증을 취소할까요? 알바가 다시 이름·사번으로 비밀번호를 설정해야 합니다.')) return
+      void api(`/api/employees/${id}/revoke-auth`, { method: 'POST' })
+        .then(() => fillEmps(el))
+        .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
+    })
+  })
+  el.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      const id = Number(btn.dataset.del)
+      if (!window.confirm('사원을 삭제할까요?')) return
+      void api(`/api/employees/${id}`, { method: 'DELETE' })
+        .then(() => {
+          if (selectedEmpId === id) selectedEmpId = null
+          return fillEmps(el)
+        })
+        .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
+    })
   })
 }
 
