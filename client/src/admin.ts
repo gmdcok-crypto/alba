@@ -52,7 +52,9 @@ let attMode: AttMode = 'all'
 let attFrom = ''
 let attTo = ''
 let attEmpId: number | null = null
+let attEmpLabel = ''
 let attDeptId: number | null = null
+let attPickDeptId: number | null = null
 let attCache: PeriodAttendance | null = null
 let liveTimer = 0
 
@@ -828,6 +830,101 @@ function attModeLabel(mode: AttMode): string {
   return '전체지점'
 }
 
+function closeEmpPicker(): void {
+  document.querySelector('#emp-picker')?.remove()
+}
+
+function openEmpPicker(emps: Employee[], depts: Department[], onPick: (emp: Employee) => void): void {
+  closeEmpPicker()
+  let pickDeptId = attPickDeptId
+  if (pickDeptId && !depts.some((d) => d.id === pickDeptId)) pickDeptId = null
+
+  const overlay = document.createElement('div')
+  overlay.id = 'emp-picker'
+  overlay.className = 'modal-overlay'
+  overlay.innerHTML = `
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="emp-picker-title">
+      <div class="modal-hd">
+        <div>
+          <h3 id="emp-picker-title">사원조회</h3>
+          <p>지점을 고른 뒤 사원을 선택하세요.</p>
+        </div>
+        <button type="button" class="btn" id="emp-picker-close">닫기</button>
+      </div>
+      <div class="modal-toolbar">
+        <div class="field"><label>지점</label>
+          <select id="emp-picker-dept">
+            <option value="">지점 선택</option>
+            ${depts
+              .map(
+                (d) =>
+                  `<option value="${d.id}" ${pickDeptId === d.id ? 'selected' : ''}>${esc(d.name)}</option>`,
+              )
+              .join('')}
+          </select>
+        </div>
+        <div class="field"><label>검색</label><input id="emp-picker-q" placeholder="사번·이름" /></div>
+      </div>
+      <div class="modal-body" id="emp-picker-list"></div>
+    </div>
+  `
+  document.body.appendChild(overlay)
+
+  const paintList = () => {
+    const list = overlay.querySelector('#emp-picker-list')
+    if (!list) return
+    const q = (overlay.querySelector<HTMLInputElement>('#emp-picker-q')?.value || '').trim().toLowerCase()
+    if (!pickDeptId) {
+      list.innerHTML = '<p class="empty">지점을 먼저 선택하세요.</p>'
+      return
+    }
+    const rows = emps.filter((e) => {
+      if (e.department_id !== pickDeptId) return false
+      if (!q) return true
+      return `${e.employee_no} ${e.name}`.toLowerCase().includes(q)
+    })
+    list.innerHTML = rows.length
+      ? `<table class="data-table">
+          <thead><tr><th>사번</th><th>이름</th><th>상태</th><th>인증</th></tr></thead>
+          <tbody>
+            ${rows
+              .map(
+                (e) => `
+              <tr data-emp="${e.id}" class="${attEmpId === e.id ? 'is-active' : ''}" style="cursor:pointer">
+                <td>${esc(e.employee_no)}</td>
+                <td>${esc(e.name)}</td>
+                <td>${esc(e.status)}</td>
+                <td>${esc(e.auth_label)}</td>
+              </tr>`,
+              )
+              .join('')}
+          </tbody>
+        </table>`
+      : '<p class="empty">해당 지점에 사원이 없습니다.</p>'
+    list.querySelectorAll<HTMLTableRowElement>('tr[data-emp]').forEach((row) => {
+      row.addEventListener('click', () => {
+        const emp = emps.find((e) => e.id === Number(row.dataset.emp))
+        if (!emp) return
+        attPickDeptId = pickDeptId
+        onPick(emp)
+        closeEmpPicker()
+      })
+    })
+  }
+
+  overlay.addEventListener('click', (ev) => {
+    if (ev.target === overlay) closeEmpPicker()
+  })
+  overlay.querySelector('#emp-picker-close')?.addEventListener('click', closeEmpPicker)
+  overlay.querySelector('#emp-picker-dept')?.addEventListener('change', () => {
+    const v = (overlay.querySelector<HTMLSelectElement>('#emp-picker-dept')?.value || '').trim()
+    pickDeptId = v ? Number(v) : null
+    paintList()
+  })
+  overlay.querySelector('#emp-picker-q')?.addEventListener('input', () => paintList())
+  paintList()
+}
+
 function downloadAttExcel(data: PeriodAttendance, mode: AttMode): void {
   const storeName = store?.name || '회사'
   const modeName = attModeLabel(mode)
@@ -913,17 +1010,17 @@ async function fillAtt(el: Element): Promise<void> {
   ])
   const emps = empData.items
   const depts = deptData.items
-  if (attMode === 'person' && attEmpId && !emps.some((e) => e.id === attEmpId)) attEmpId = null
+  if (attMode === 'person' && attEmpId) {
+    const found = emps.find((e) => e.id === attEmpId)
+    if (!found) {
+      attEmpId = null
+      attEmpLabel = ''
+    } else {
+      attEmpLabel = `${found.employee_no} ${found.name}${found.department_name ? ` · ${found.department_name}` : ''}`
+    }
+  }
   if (attMode === 'branch' && attDeptId && !depts.some((d) => d.id === attDeptId)) attDeptId = null
 
-  const empOptions = ['<option value="">사원 선택</option>']
-    .concat(
-      emps.map(
-        (e) =>
-          `<option value="${e.id}" ${attEmpId === e.id ? 'selected' : ''}>${esc(e.employee_no)} ${esc(e.name)}${e.department_name ? ` · ${esc(e.department_name)}` : ''}</option>`,
-      ),
-    )
-    .join('')
   const deptOptions = ['<option value="">지점 선택</option>']
     .concat(
       depts.map(
@@ -951,7 +1048,12 @@ async function fillAtt(el: Element): Promise<void> {
       }
       ${
         attMode === 'person'
-          ? `<div class="field"><label>사원</label><select id="att-emp">${empOptions}</select></div>`
+          ? `<div class="field"><label>사원</label>
+              <div class="picker-field">
+                <input id="att-emp-label" readonly value="${esc(attEmpLabel || '사원을 선택하세요')}" />
+                <button class="btn" type="button" id="att-emp-pick">사원조회</button>
+              </div>
+            </div>`
           : ''
       }
       <button class="btn btn-primary" id="att-search">조회</button>
@@ -1077,14 +1179,21 @@ async function fillAtt(el: Element): Promise<void> {
     attCache = null
     void fillAtt(el)
   })
+  document.querySelector('#att-emp-pick')?.addEventListener('click', () => {
+    openEmpPicker(emps, depts, (emp) => {
+      attEmpId = emp.id
+      attEmpLabel = `${emp.employee_no} ${emp.name}${emp.department_name ? ` · ${emp.department_name}` : ''}`
+      const label = document.querySelector<HTMLInputElement>('#att-emp-label')
+      if (label) label.value = attEmpLabel
+      attCache = null
+    })
+  })
   document.querySelector('#att-search')?.addEventListener('click', () => {
     attFrom = val('att-from') || monthStartStr()
     attTo = val('att-to') || todayStr()
     attMode = (val('att-mode') as AttMode) || 'all'
-    const emp = val('att-emp')
     const dept = val('att-dept')
-    attEmpId = emp ? Number(emp) : null
-    attDeptId = dept ? Number(dept) : null
+    if (attMode === 'branch') attDeptId = dept ? Number(dept) : null
     void paint().catch((e: unknown) => {
       const body = document.querySelector('#att-body')
       if (body) body.innerHTML = `<p class="empty">${e instanceof Error ? e.message : '실패'}</p>`
