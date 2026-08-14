@@ -246,6 +246,24 @@ async function submitOnboard(): Promise<void> {
   }
 }
 
+function resetViewInputs(): void {
+  closeEmpPicker()
+  selectedDeptId = null
+  selectedMgrId = null
+  selectedEmpId = null
+  selectedEventId = null
+  rawFilterEmpId = null
+  rawFilterDeptId = null
+  attMode = 'all'
+  attFrom = ''
+  attTo = ''
+  attEmpId = null
+  attEmpLabel = ''
+  attDeptId = null
+  attPickDeptId = null
+  attCache = null
+}
+
 function renderShell(): void {
   window.clearInterval(qrDrawTimer)
   window.clearInterval(qrTickTimer)
@@ -294,7 +312,10 @@ function renderShell(): void {
   `
   root.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      view = btn.dataset.view as View
+      const next = btn.dataset.view as View
+      if (next === view) return
+      resetViewInputs()
+      view = next
       renderShell()
     })
   })
@@ -1176,7 +1197,14 @@ async function fillAtt(el: Element): Promise<void> {
 
   document.querySelector('#att-mode')?.addEventListener('change', () => {
     attMode = (val('att-mode') as AttMode) || 'all'
+    attFrom = ''
+    attTo = ''
+    attEmpId = null
+    attEmpLabel = ''
+    attDeptId = null
+    attPickDeptId = null
     attCache = null
+    closeEmpPicker()
     void fillAtt(el)
   })
   document.querySelector('#att-emp-pick')?.addEventListener('click', () => {
