@@ -122,7 +122,7 @@ function isManager(): boolean {
 
 function allowedViews(): View[] {
   if (isManager()) return ['dashboard', 'emps']
-  return ['dashboard', 'company', 'depts', 'managers', 'emps', 'att', 'raw', 'qr']
+  return ['dashboard', 'company', 'depts', 'managers', 'emps', 'raw', 'att', 'qr']
 }
 
 function render(): void {
@@ -257,8 +257,8 @@ function renderShell(): void {
     { id: 'depts', label: '지점관리' },
     { id: 'managers', label: '점장관리' },
     { id: 'emps', label: '사원관리' },
-    { id: 'att', label: '출퇴근현황' },
     { id: 'raw', label: '원시데이터' },
+    { id: 'att', label: '출퇴근현황' },
     { id: 'qr', label: '출근 QR' },
   ]
   const nav = allNav.filter((n) => allowedViews().includes(n.id))
