@@ -104,6 +104,8 @@ export type PeriodRow = {
   employee_id: number
   employee_no: string
   name: string
+  department_id?: number | null
+  department_name?: string
   in_at: string | null
   out_at: string | null
   open: boolean

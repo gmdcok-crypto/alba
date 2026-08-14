@@ -1,4 +1,5 @@
 import './admin.css'
+import * as XLSX from 'xlsx'
 import {
   adminSession,
   hhmm,
@@ -9,6 +10,8 @@ import {
   type Employee,
   type Live,
   type Manager,
+  type PeriodAttendance,
+  type PeriodRow,
   type Store,
   type User,
 } from './api'
@@ -19,13 +22,15 @@ const mounted = document.querySelector<HTMLDivElement>('#app')
 if (!mounted) throw new Error('#app missing')
 const root: HTMLDivElement = mounted
 
-type View = 'dashboard' | 'company' | 'depts' | 'managers' | 'emps' | 'raw' | 'qr'
+type View = 'dashboard' | 'company' | 'depts' | 'managers' | 'emps' | 'att' | 'raw' | 'qr'
+type AttMode = 'person' | 'all' | 'branch'
 const VIEW_TITLE: Record<View, string> = {
   dashboard: '대시보드',
   company: '회사등록',
   depts: '지점관리',
   managers: '점장관리',
   emps: '사원관리',
+  att: '출퇴근현황',
   raw: '원시데이터',
   qr: '출근 QR',
 }
@@ -43,6 +48,12 @@ let selectedEmpId: number | null = null
 let selectedEventId: number | null = null
 let rawFilterEmpId: number | null = null
 let rawFilterDeptId: number | null = null
+let attMode: AttMode = 'all'
+let attFrom = ''
+let attTo = ''
+let attEmpId: number | null = null
+let attDeptId: number | null = null
+let attCache: PeriodAttendance | null = null
 let liveTimer = 0
 
 function esc(s: string): string {
@@ -53,6 +64,19 @@ function todayStr(offset = 0): string {
   const d = new Date()
   d.setDate(d.getDate() + offset)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function monthStartStr(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+}
+
+function minutesLabel(minutes: number): string {
+  const h = Math.floor(Math.max(0, minutes) / 60)
+  const m = Math.max(0, minutes) % 60
+  if (h && m) return `${h}시간 ${m}분`
+  if (h) return `${h}시간`
+  return `${m}분`
 }
 
 function pickStore(): Store | null {
@@ -96,7 +120,7 @@ function isManager(): boolean {
 
 function allowedViews(): View[] {
   if (isManager()) return ['dashboard', 'emps']
-  return ['dashboard', 'company', 'depts', 'managers', 'emps', 'raw', 'qr']
+  return ['dashboard', 'company', 'depts', 'managers', 'emps', 'att', 'raw', 'qr']
 }
 
 function render(): void {
@@ -231,6 +255,7 @@ function renderShell(): void {
     { id: 'depts', label: '지점관리' },
     { id: 'managers', label: '점장관리' },
     { id: 'emps', label: '사원관리' },
+    { id: 'att', label: '출퇴근현황' },
     { id: 'raw', label: '원시데이터' },
     { id: 'qr', label: '출근 QR' },
   ]
@@ -284,6 +309,7 @@ async function fillView(): Promise<void> {
     else if (view === 'depts') await fillDepts(el)
     else if (view === 'managers') await fillManagers(el)
     else if (view === 'emps') await fillEmps(el)
+    else if (view === 'att') await fillAtt(el)
     else if (view === 'raw') await fillRaw(el)
     else await fillQr(el)
   } catch (e) {
@@ -794,6 +820,290 @@ async function fillEmps(el: Element): Promise<void> {
         .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
     })
   })
+}
+
+function attModeLabel(mode: AttMode): string {
+  if (mode === 'person') return '개인별'
+  if (mode === 'branch') return '지점별'
+  return '전체지점'
+}
+
+function downloadAttExcel(data: PeriodAttendance, mode: AttMode): void {
+  const storeName = store?.name || '회사'
+  const modeName = attModeLabel(mode)
+  const title = `${storeName} 출퇴근현황 보고서`
+  const period = `${data.date_from} ~ ${data.date_to}`
+  const aoa: (string | number)[][] = [
+    [title],
+    [`조회구분: ${modeName}`, `기간: ${period}`, `총 근무: ${data.hours_label}`, `건수: ${data.items.length}`],
+    [],
+    ['날짜', '지점', '사번', '이름', '출근', '퇴근', '근무시간', '분'],
+  ]
+  for (const r of data.items) {
+    aoa.push([
+      r.date,
+      r.department_name || '-',
+      r.employee_no,
+      r.name,
+      hhmm(r.in_at),
+      r.open ? '미퇴근' : hhmm(r.out_at),
+      r.hours_label,
+      r.minutes,
+    ])
+  }
+  aoa.push([])
+  aoa.push(['합계', '', '', '', '', '', data.hours_label, data.minutes])
+
+  const summaryMap = new Map<string, { label: string; minutes: number; count: number }>()
+  for (const r of data.items) {
+    const key =
+      mode === 'branch'
+        ? `d:${r.department_id ?? 0}:${r.department_name || '미배정'}`
+        : `e:${r.employee_id}:${r.employee_no} ${r.name}`
+    const label =
+      mode === 'branch'
+        ? r.department_name || '미배정'
+        : `${r.employee_no} ${r.name}${r.department_name ? ` (${r.department_name})` : ''}`
+    const cur = summaryMap.get(key) || { label, minutes: 0, count: 0 }
+    cur.minutes += r.minutes
+    cur.count += 1
+    summaryMap.set(key, cur)
+  }
+  const summaryAoa: (string | number)[][] = [
+    [`${title} - 집계`],
+    [`조회구분: ${modeName}`, `기간: ${period}`],
+    [],
+    mode === 'branch'
+      ? ['지점', '건수', '총 근무시간', '분']
+      : ['사원', '건수', '총 근무시간', '분'],
+  ]
+  const summaries = [...summaryMap.values()].sort((a, b) => a.label.localeCompare(b.label, 'ko'))
+  for (const s of summaries) {
+    summaryAoa.push([s.label, s.count, minutesLabel(s.minutes), s.minutes])
+  }
+  summaryAoa.push([])
+  summaryAoa.push(['합계', data.items.length, data.hours_label, data.minutes])
+
+  const wb = XLSX.utils.book_new()
+  const detail = XLSX.utils.aoa_to_sheet(aoa)
+  detail['!cols'] = [
+    { wch: 12 },
+    { wch: 14 },
+    { wch: 10 },
+    { wch: 12 },
+    { wch: 8 },
+    { wch: 8 },
+    { wch: 12 },
+    { wch: 8 },
+  ]
+  XLSX.utils.book_append_sheet(wb, detail, '출퇴근상세')
+  const summary = XLSX.utils.aoa_to_sheet(summaryAoa)
+  summary['!cols'] = [{ wch: 28 }, { wch: 8 }, { wch: 14 }, { wch: 8 }]
+  XLSX.utils.book_append_sheet(wb, summary, '집계')
+  const file = `출퇴근현황_${modeName}_${data.date_from}_${data.date_to}.xlsx`
+  XLSX.writeFile(wb, file)
+}
+
+async function fillAtt(el: Element): Promise<void> {
+  if (!attFrom) attFrom = monthStartStr()
+  if (!attTo) attTo = todayStr()
+  const [empData, deptData] = await Promise.all([
+    api<{ items: Employee[] }>(`/api/employees?store_id=${store!.id}`),
+    api<{ items: Department[] }>(`/api/departments?store_id=${store!.id}`),
+  ])
+  const emps = empData.items
+  const depts = deptData.items
+  if (attMode === 'person' && attEmpId && !emps.some((e) => e.id === attEmpId)) attEmpId = null
+  if (attMode === 'branch' && attDeptId && !depts.some((d) => d.id === attDeptId)) attDeptId = null
+
+  const empOptions = ['<option value="">사원 선택</option>']
+    .concat(
+      emps.map(
+        (e) =>
+          `<option value="${e.id}" ${attEmpId === e.id ? 'selected' : ''}>${esc(e.employee_no)} ${esc(e.name)}${e.department_name ? ` · ${esc(e.department_name)}` : ''}</option>`,
+      ),
+    )
+    .join('')
+  const deptOptions = ['<option value="">지점 선택</option>']
+    .concat(
+      depts.map(
+        (d) =>
+          `<option value="${d.id}" ${attDeptId === d.id ? 'selected' : ''}>${esc(d.name)}</option>`,
+      ),
+    )
+    .join('')
+
+  el.innerHTML = `
+    <div class="page-toolbar">
+      <div class="field"><label>조회구분</label>
+        <select id="att-mode">
+          <option value="all" ${attMode === 'all' ? 'selected' : ''}>전체지점</option>
+          <option value="branch" ${attMode === 'branch' ? 'selected' : ''}>지점별</option>
+          <option value="person" ${attMode === 'person' ? 'selected' : ''}>개인별</option>
+        </select>
+      </div>
+      <div class="field"><label>시작일</label><input id="att-from" type="date" value="${esc(attFrom)}" /></div>
+      <div class="field"><label>종료일</label><input id="att-to" type="date" value="${esc(attTo)}" /></div>
+      ${
+        attMode === 'branch'
+          ? `<div class="field"><label>지점</label><select id="att-dept">${deptOptions}</select></div>`
+          : ''
+      }
+      ${
+        attMode === 'person'
+          ? `<div class="field"><label>사원</label><select id="att-emp">${empOptions}</select></div>`
+          : ''
+      }
+      <button class="btn btn-primary" id="att-search">조회</button>
+      <button class="btn" id="att-excel" ${attCache ? '' : 'disabled'}>엑셀로 저장</button>
+    </div>
+    <div id="att-body"><p class="empty">기간을 선택하고 조회하세요.</p></div>
+  `
+
+  const paint = async () => {
+    if (!store) return
+    if (attMode === 'person' && !attEmpId) {
+      attCache = null
+      const body = document.querySelector('#att-body')
+      if (body) body.innerHTML = '<p class="empty">사원을 선택한 뒤 조회하세요.</p>'
+      return
+    }
+    if (attMode === 'branch' && !attDeptId) {
+      attCache = null
+      const body = document.querySelector('#att-body')
+      if (body) body.innerHTML = '<p class="empty">지점을 선택한 뒤 조회하세요.</p>'
+      return
+    }
+    const q =
+      (attMode === 'person' && attEmpId ? `&employee_id=${attEmpId}` : '') +
+      (attMode === 'branch' && attDeptId ? `&department_id=${attDeptId}` : '')
+    const data = await api<PeriodAttendance>(
+      `/api/owner/${store.id}/period?date_from=${attFrom}&date_to=${attTo}${q}`,
+    )
+    attCache = data
+    const excelBtn = document.querySelector<HTMLButtonElement>('#att-excel')
+    if (excelBtn) excelBtn.disabled = data.items.length === 0
+
+    const byKey = new Map<string, { label: string; minutes: number; count: number; rows: PeriodRow[] }>()
+    for (const r of data.items) {
+      const key =
+        attMode === 'branch'
+          ? String(r.department_id ?? 0)
+          : attMode === 'person'
+            ? String(r.employee_id)
+            : `${r.department_id ?? 0}:${r.employee_id}`
+      const label =
+        attMode === 'branch'
+          ? r.department_name || '미배정'
+          : attMode === 'person'
+            ? `${r.employee_no} ${r.name}`
+            : `${r.department_name || '미배정'} · ${r.employee_no} ${r.name}`
+      const cur = byKey.get(key) || { label, minutes: 0, count: 0, rows: [] }
+      cur.minutes += r.minutes
+      cur.count += 1
+      cur.rows.push(r)
+      byKey.set(key, cur)
+    }
+    const groups = [...byKey.values()].sort((a, b) => a.label.localeCompare(b.label, 'ko'))
+
+    const body = document.querySelector('#att-body')
+    if (!body) return
+    body.innerHTML = `
+      <div class="stat-grid" style="margin-bottom:12px">
+        <div class="stat-card"><div class="stat-label">조회구분</div><div class="stat-value" style="font-size:1.1rem">${esc(attModeLabel(attMode))}</div></div>
+        <div class="stat-card"><div class="stat-label">기간</div><div class="stat-value" style="font-size:1.05rem">${esc(data.date_from)} ~ ${esc(data.date_to)}</div></div>
+        <div class="stat-card"><div class="stat-label">기록</div><div class="stat-value">${data.items.length}건</div></div>
+        <div class="stat-card"><div class="stat-label">총 근무</div><div class="stat-value" style="font-size:1.1rem">${esc(data.hours_label)}</div></div>
+      </div>
+      <section class="table-panel">
+        <div class="panel-hd"><h3>출퇴근 현황</h3></div>
+        ${
+          data.items.length
+            ? `<table class="data-table">
+            <thead>
+              <tr>
+                <th>날짜</th>
+                <th>지점</th>
+                <th>사번</th>
+                <th>이름</th>
+                <th>출근</th>
+                <th>퇴근</th>
+                <th>근무</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${data.items
+                .map(
+                  (r) => `
+                <tr>
+                  <td>${esc(r.date)}</td>
+                  <td>${esc(r.department_name || '-')}</td>
+                  <td>${esc(r.employee_no)}</td>
+                  <td>${esc(r.name)}</td>
+                  <td>${hhmm(r.in_at)}</td>
+                  <td>${r.open ? '미퇴근' : hhmm(r.out_at)}</td>
+                  <td>${esc(r.hours_label)}</td>
+                </tr>`,
+                )
+                .join('')}
+            </tbody>
+          </table>`
+            : '<p class="empty">해당 조건의 출퇴근 기록이 없습니다.</p>'
+        }
+      </section>
+      ${
+        groups.length && attMode !== 'person'
+          ? `<section class="table-panel" style="margin-top:14px">
+          <div class="panel-hd"><h3>${attMode === 'branch' ? '지점별 집계' : '개인·지점 집계'}</h3></div>
+          <table class="data-table">
+            <thead><tr><th>${attMode === 'branch' ? '지점' : '구분'}</th><th>건수</th><th>총 근무</th></tr></thead>
+            <tbody>
+              ${groups
+                .map(
+                  (g) =>
+                    `<tr><td>${esc(g.label)}</td><td>${g.count}</td><td>${esc(minutesLabel(g.minutes))}</td></tr>`,
+                )
+                .join('')}
+            </tbody>
+          </table>
+        </section>`
+          : ''
+      }
+    `
+  }
+
+  document.querySelector('#att-mode')?.addEventListener('change', () => {
+    attMode = (val('att-mode') as AttMode) || 'all'
+    attCache = null
+    void fillAtt(el)
+  })
+  document.querySelector('#att-search')?.addEventListener('click', () => {
+    attFrom = val('att-from') || monthStartStr()
+    attTo = val('att-to') || todayStr()
+    attMode = (val('att-mode') as AttMode) || 'all'
+    const emp = val('att-emp')
+    const dept = val('att-dept')
+    attEmpId = emp ? Number(emp) : null
+    attDeptId = dept ? Number(dept) : null
+    void paint().catch((e: unknown) => {
+      const body = document.querySelector('#att-body')
+      if (body) body.innerHTML = `<p class="empty">${e instanceof Error ? e.message : '실패'}</p>`
+    })
+  })
+  document.querySelector('#att-excel')?.addEventListener('click', () => {
+    if (!attCache || !attCache.items.length) {
+      window.alert('먼저 조회한 뒤 엑셀로 저장하세요.')
+      return
+    }
+    downloadAttExcel(attCache, attMode)
+  })
+
+  try {
+    await paint()
+  } catch (e) {
+    const body = document.querySelector('#att-body')
+    if (body) body.innerHTML = `<p class="empty">${e instanceof Error ? e.message : '실패'}</p>`
+  }
 }
 
 function sourceLabel(source: string | null): string {

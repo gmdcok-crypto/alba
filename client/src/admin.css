@@ -346,6 +346,12 @@ button { cursor: pointer; }
 
 .btn-primary:hover { background: var(--admin-accent-hover); }
 
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .btn-danger {
   background: #fff;
   border-color: #f3c4c0;

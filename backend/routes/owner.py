@@ -160,6 +160,7 @@ def period_records(
     date_from: str,
     date_to: str,
     employee_id: Optional[int] = None,
+    department_id: Optional[int] = None,
     user: dict = Depends(get_current_user),
     conn: Connection = Depends(get_db),
 ) -> dict:
@@ -177,21 +178,24 @@ def period_records(
     start = start_day.strftime("%Y-%m-%d") + " 00:00:00"
     end = (end_day + timedelta(days=1)).strftime("%Y-%m-%d") + " 00:00:00"
     today = now_kst().strftime("%Y-%m-%d")
-    dept_id = manager_department_id(user)
+    mgr_dept = manager_department_id(user)
+    filter_dept = mgr_dept if mgr_dept is not None else (int(department_id) if department_id else None)
     cur = conn.cursor()
     sql = """
-        SELECT e.id AS employee_id, e.employee_no, e.name
+        SELECT e.id AS employee_id, e.employee_no, e.name,
+               e.department_id, d.name AS department_name
         FROM employees e
+        LEFT JOIN departments d ON d.id = e.department_id
         WHERE e.store_id = %s
     """
     params: list[object] = [store_id]
-    if dept_id is not None:
+    if filter_dept is not None:
         sql += " AND e.department_id = %s"
-        params.append(dept_id)
+        params.append(filter_dept)
     if employee_id:
         sql += " AND e.id = %s"
         params.append(int(employee_id))
-    sql += " ORDER BY e.name ASC"
+    sql += " ORDER BY d.name ASC, e.name ASC"
     cur.execute(sql, tuple(params))
     members = cur.fetchall() or []
     emp_ids = [int(m["employee_id"]) for m in members]
@@ -240,6 +244,8 @@ def period_records(
                     "employee_id": eid,
                     "employee_no": mem["employee_no"],
                     "name": mem["name"],
+                    "department_id": int(mem["department_id"]) if mem.get("department_id") else None,
+                    "department_name": mem.get("department_name") or "",
                     "in_at": dt_iso(sess["in_at"]),
                     "out_at": dt_iso(sess["out_at"]),
                     "open": bool(sess["open"]),
@@ -247,7 +253,7 @@ def period_records(
                     "hours_label": minutes_to_hours_label(minutes),
                 }
             )
-    items.sort(key=lambda r: (r["name"], r["in_at"] or ""))
+    items.sort(key=lambda r: (r["department_name"] or "", r["name"], r["in_at"] or ""))
     items.sort(key=lambda r: r["date"], reverse=True)
     return {
         "date_from": date_from[:10],
