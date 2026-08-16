@@ -90,6 +90,8 @@ def _worker_payload(emp: dict) -> dict:
         "role": "worker",
         "store_id": emp["store_id"],
         "store_name": emp.get("store_name"),
+        "department_id": emp.get("department_id"),
+        "department_name": emp.get("department_name") or "",
         "hourly_wage": emp.get("hourly_wage") or 0,
         "auth_status": emp.get("auth_status"),
         "status": emp.get("status"),
@@ -230,9 +232,11 @@ def worker_login(body: WorkerLoginBody, conn: Connection = Depends(get_db)) -> d
         cur.execute(
             """
             SELECT e.id, e.store_id, e.employee_no, e.name, e.status, e.auth_status,
-                   e.password_hash, e.hourly_wage, s.name AS store_name
+                   e.password_hash, e.hourly_wage, e.department_id,
+                   s.name AS store_name, d.name AS department_name
             FROM employees e
             JOIN stores s ON s.id = e.store_id
+            LEFT JOIN departments d ON d.id = e.department_id
             WHERE e.employee_no = %s AND e.name = %s
             """,
             (emp_no, name),
@@ -241,9 +245,11 @@ def worker_login(body: WorkerLoginBody, conn: Connection = Depends(get_db)) -> d
         cur.execute(
             """
             SELECT e.id, e.store_id, e.employee_no, e.name, e.status, e.auth_status,
-                   e.password_hash, e.hourly_wage, s.name AS store_name
+                   e.password_hash, e.hourly_wage, e.department_id,
+                   s.name AS store_name, d.name AS department_name
             FROM employees e
             JOIN stores s ON s.id = e.store_id
+            LEFT JOIN departments d ON d.id = e.department_id
             WHERE e.employee_no = %s
             """,
             (emp_no,),
@@ -302,9 +308,10 @@ def worker_refresh(body: RefreshBody, conn: Connection = Depends(get_db)) -> dic
     cur.execute(
         """
         SELECT e.id, e.store_id, e.employee_no, e.name, e.status, e.auth_status,
-               e.hourly_wage, s.name AS store_name
+               e.hourly_wage, e.department_id, s.name AS store_name, d.name AS department_name
         FROM employees e
         JOIN stores s ON s.id = e.store_id
+        LEFT JOIN departments d ON d.id = e.department_id
         WHERE e.id = %s
         LIMIT 1
         """,

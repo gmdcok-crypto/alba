@@ -16,7 +16,7 @@ router = APIRouter(prefix="/employees", tags=["employees"])
 
 class EmployeeCreate(BaseModel):
     store_id: int
-    employee_no: str = Field(..., min_length=1, max_length=32)
+    employee_no: str = ""
     name: str = Field(..., min_length=1, max_length=64)
     department_name: str = ""
     hire_date: str = Field(..., min_length=8)
@@ -44,6 +44,27 @@ def _department_name_for_write(conn: Connection, store_id: int, user: dict, depa
     if user.get("role") == "manager":
         return str(user.get("department_name") or "")
     return department_name
+
+
+def _next_employee_no(conn: Connection, store_id: int) -> str:
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT employee_no FROM employees WHERE store_id = %s",
+        (store_id,),
+    )
+    max_n = 0
+    for row in cur.fetchall() or []:
+        text = str(row.get("employee_no") or "").strip()
+        if text.isdigit():
+            max_n = max(max_n, int(text))
+    return f"{max_n + 1:04d}"
+
+
+def _resolve_employee_no(conn: Connection, store_id: int, employee_no: str) -> str:
+    text = (employee_no or "").strip()
+    if text:
+        return text
+    return _next_employee_no(conn, store_id)
 
 
 def _load_employee(conn: Connection, emp_id: int) -> dict:
@@ -141,30 +162,36 @@ def create_employee(
     dept_id = _resolve_department_id(conn, body.store_id, dept_name)
     hd = _parse_hire_date(body.hire_date)
     status = body.status.strip() or "재직"
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO employees
-              (store_id, employee_no, name, department_id, hire_date, status, password_hash, auth_status, hourly_wage)
-            VALUES (%s, %s, %s, %s, %s, %s, NULL, 'X', %s)
-            """,
-            (
-                body.store_id,
-                body.employee_no.strip(),
-                body.name.strip(),
-                dept_id,
-                hd.isoformat(),
-                status,
-                max(0, int(body.hourly_wage or 0)),
-            ),
-        )
-        conn.commit()
-        new_id = int(cur.lastrowid)
-    except IntegrityError as e:
-        conn.rollback()
-        raise HTTPException(status_code=409, detail="이미 사용 중인 사번입니다.") from e
-    return {"id": new_id}
+    employee_no = _resolve_employee_no(conn, body.store_id, body.employee_no)
+    last_error: Exception | None = None
+    for _ in range(3):
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO employees
+                  (store_id, employee_no, name, department_id, hire_date, status, password_hash, auth_status, hourly_wage)
+                VALUES (%s, %s, %s, %s, %s, %s, NULL, 'X', %s)
+                """,
+                (
+                    body.store_id,
+                    employee_no,
+                    body.name.strip(),
+                    dept_id,
+                    hd.isoformat(),
+                    status,
+                    max(0, int(body.hourly_wage or 0)),
+                ),
+            )
+            conn.commit()
+            return {"id": int(cur.lastrowid), "employee_no": employee_no}
+        except IntegrityError as e:
+            conn.rollback()
+            last_error = e
+            if (body.employee_no or "").strip():
+                raise HTTPException(status_code=409, detail="이미 사용 중인 사번입니다.") from e
+            employee_no = _next_employee_no(conn, body.store_id)
+    raise HTTPException(status_code=409, detail="사번 자동 부여에 실패했습니다.") from last_error
 
 
 @router.put("/{emp_id}")

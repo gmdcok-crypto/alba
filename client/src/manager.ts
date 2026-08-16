@@ -385,7 +385,11 @@ async function fillEmps(el: Element): Promise<void> {
     }
     <div class="pad">
       <p class="sub" style="margin:0 0 12px;font-weight:700">${selected ? '사원 수정' : '새 사원 등록'}</p>
-      <div class="auth-field"><label>사번</label><input id="emp-no" value="${esc(selected?.employee_no || '')}" /></div>
+      ${
+        selected
+          ? `<div class="auth-field"><label>사번</label><input id="emp-no" value="${esc(selected.employee_no)}" readonly /></div>`
+          : `<div class="auth-field"><label>사번</label><input value="자동 부여" disabled /></div>`
+      }
       <div class="auth-field"><label>이름</label><input id="emp-name" value="${esc(selected?.name || '')}" /></div>
       <div class="auth-field"><label>입사일</label><input id="emp-hire" type="date" value="${esc(selected?.hire_date || todayStr())}" /></div>
       <div class="auth-field"><label>상태</label>
@@ -424,7 +428,7 @@ async function fillEmps(el: Element): Promise<void> {
   function payload() {
     return {
       store_id: store!.id,
-      employee_no: val('emp-no'),
+      employee_no: selected?.employee_no || '',
       name: val('emp-name'),
       department_name: user?.department_name || '',
       hire_date: val('emp-hire'),
@@ -434,13 +438,17 @@ async function fillEmps(el: Element): Promise<void> {
   }
   el.querySelector('#emp-create')?.addEventListener('click', () => {
     const body = payload()
-    if (!body.employee_no || !body.name) {
-      window.alert('사번과 이름을 입력하세요.')
+    if (!body.name) {
+      window.alert('이름을 입력하세요.')
       return
     }
-    void api('/api/employees', { method: 'POST', body: JSON.stringify(body) })
-      .then(() => {
+    void api<{ id: number; employee_no?: string }>('/api/employees', {
+      method: 'POST',
+      body: JSON.stringify({ ...body, employee_no: '' }),
+    })
+      .then((res) => {
         selectedEmpId = null
+        if (res.employee_no) window.alert(`사번 ${res.employee_no}이(가) 부여되었습니다.`)
         reload()
       })
       .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
@@ -452,7 +460,7 @@ async function fillEmps(el: Element): Promise<void> {
     }
     const body = payload()
     if (!body.employee_no || !body.name) {
-      window.alert('사번과 이름을 입력하세요.')
+      window.alert('이름을 입력하세요.')
       return
     }
     void api(`/api/employees/${selected.id}`, { method: 'PUT', body: JSON.stringify(body) })

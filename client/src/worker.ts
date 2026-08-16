@@ -35,12 +35,19 @@ function clockText(d = new Date()): string {
   return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
+function workplaceLabel(u: User | null): string {
+  const storeName = (u?.store_name || '').trim()
+  const deptName = (u?.department_name || '').trim()
+  if (storeName && deptName) return `${storeName} ${deptName}`
+  return storeName || deptName || ''
+}
+
 function storeFromUser(u: User | null): Store | null {
   if (!u?.store_id) return null
   return {
     id: u.store_id,
     owner_id: 0,
-    name: u.store_name || '',
+    name: workplaceLabel(u),
     invite_code: '',
     lat: null,
     lng: null,
@@ -350,7 +357,7 @@ function fillMore(el: Element): void {
   el.innerHTML = `
     <header class="screen-header">
       <h1>더보기</h1>
-      <p class="sub">${user?.name} · 사번 ${user?.employee_no || user?.login_id || ''}</p>
+      <p class="sub">${workplaceLabel(user)} · ${user?.name} · 사번 ${user?.employee_no || user?.login_id || ''}</p>
     </header>
     <div class="pad">
       <p class="empty" style="text-align:left;margin:0 0 16px">계정은 관리자가 등록합니다. 퇴사·인증취소 후에는 다시 로그인할 수 없습니다.</p>

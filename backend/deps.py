@@ -78,9 +78,10 @@ def get_current_employee(
     cur.execute(
         """
         SELECT e.id, e.store_id, e.employee_no, e.name, e.status, e.auth_status,
-               e.hourly_wage, e.department_id, s.name AS store_name
+               e.hourly_wage, e.department_id, s.name AS store_name, d.name AS department_name
         FROM employees e
         JOIN stores s ON s.id = e.store_id
+        LEFT JOIN departments d ON d.id = e.department_id
         WHERE e.id = %s
         LIMIT 1
         """,

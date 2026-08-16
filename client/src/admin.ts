@@ -746,13 +746,17 @@ async function fillEmps(el: Element): Promise<void> {
                 ? `${esc(user?.department_name || '지점')} 사원만 등록됩니다.`
                 : selected
                   ? '행을 눌러 선택한 사원을 수정합니다.'
-                  : '이름과 사번으로 알바 앱에 로그인합니다.'
+                  : '사번은 등록 시 자동 부여됩니다.'
             }</p>
           </div>
         </div>
         <form class="crud-form" id="emp-form">
           <div class="form-grid" style="grid-template-columns:1fr">
-            <div class="field"><label>사번</label><input id="emp-no" value="${esc(selected?.employee_no || '')}" /></div>
+            ${
+              selected
+                ? `<div class="field"><label>사번</label><input id="emp-no" value="${esc(selected.employee_no)}" readonly /></div>`
+                : `<div class="field"><label>사번</label><input value="자동 부여" disabled /></div>`
+            }
             <div class="field"><label>이름</label><input id="emp-name" value="${esc(selected?.name || '')}" /></div>
             <div class="field"><label>지점</label><select id="emp-dept" ${isManager() ? 'disabled' : ''}>${deptOptions}</select></div>
             <div class="field"><label>입사일</label><input id="emp-hire" type="date" value="${esc(selected?.hire_date || todayStr())}" /></div>
@@ -785,7 +789,7 @@ async function fillEmps(el: Element): Promise<void> {
   function empPayload() {
     return {
       store_id: store!.id,
-      employee_no: val('emp-no'),
+      employee_no: selected?.employee_no || '',
       name: val('emp-name'),
       department_name: isManager() ? user?.department_name || val('emp-dept') : val('emp-dept'),
       hire_date: val('emp-hire'),
@@ -795,13 +799,17 @@ async function fillEmps(el: Element): Promise<void> {
   }
   el.querySelector('#emp-create')?.addEventListener('click', () => {
     const body = empPayload()
-    if (!body.employee_no || !body.name) {
-      window.alert('사번과 이름을 입력하세요.')
+    if (!body.name) {
+      window.alert('이름을 입력하세요.')
       return
     }
-    void api('/api/employees', { method: 'POST', body: JSON.stringify(body) })
-      .then(() => {
+    void api<{ id: number; employee_no?: string }>('/api/employees', {
+      method: 'POST',
+      body: JSON.stringify({ ...body, employee_no: '' }),
+    })
+      .then((res) => {
         selectedEmpId = null
+        if (res.employee_no) window.alert(`사번 ${res.employee_no}이(가) 부여되었습니다.`)
         reloadEmps()
       })
       .catch((e: unknown) => window.alert(e instanceof Error ? e.message : '실패'))
@@ -813,7 +821,7 @@ async function fillEmps(el: Element): Promise<void> {
     }
     const body = empPayload()
     if (!body.employee_no || !body.name) {
-      window.alert('사번과 이름을 입력하세요.')
+      window.alert('이름을 입력하세요.')
       return
     }
     void api(`/api/employees/${selected.id}`, { method: 'PUT', body: JSON.stringify(body) })
